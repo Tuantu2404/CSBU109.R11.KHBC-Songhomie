@@ -25,6 +25,7 @@ app.use('/api/ai', require('./routes/aiRoutes'));
 app.use('/api/rankings', require('./routes/rankingRoutes'));
 app.use('/api/competitions', require('./routes/competitionRoutes'));
 app.use('/api/comments', require('./routes/commentRoutes'));
+app.use('/api/forum', require('./routes/forumRoutes'));
 
 // Thêm Route trang chủ
 app.get('/', (req, res) => {
