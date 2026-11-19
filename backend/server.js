@@ -26,6 +26,11 @@ app.use('/api/rankings', require('./routes/rankingRoutes'));
 app.use('/api/competitions', require('./routes/competitionRoutes'));
 app.use('/api/comments', require('./routes/commentRoutes'));
 
+// Thêm Route trang chủ
+app.get('/', (req, res) => {
+  res.send('🚀 SongHomie RESTful API Server đang chạy trên cổng ' + PORT);
+});
+
 // API Health Check
 app.get('/api/health', (req, res) => {
   res.json({
@@ -35,7 +40,11 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+
 // 4. KHỞI ĐỘNG SERVER
+app.get('/', (req, res) => {
+  res.send('🚀 SongHomie RESTful API Server đang chạy thành công trên port ' + PORT);
+});
 app.listen(PORT, () => {
   console.log(`=================================`);
   console.log(`🚀 SongHomie API running on: http://localhost:${PORT}`);
