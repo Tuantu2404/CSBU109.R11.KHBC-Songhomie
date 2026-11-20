@@ -1,10 +1,9 @@
 # Dependencies (Chặn tất cả node_modules ở gốc, backend và frontend)
 node_modules/
-**/node_modules/
-
-# Environment variables (Bảo mật keys/passwords)
-.env
 *.env
+.env
+backend/.env
+backend/node_modules/
 
 # Build outputs
 dist/
