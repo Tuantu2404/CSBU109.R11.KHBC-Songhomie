@@ -1,8 +1,8 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const connectDB = require('./config/database');
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const path = require("path");
+const connectDB = require("./src/config/database");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -11,31 +11,36 @@ const PORT = process.env.PORT || 5000;
 connectDB();
 
 // 2. MIDDLEWARES HỆ THỐNG
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    credentials: true,
+  }),
+);
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Phục vụ file tĩnh (tương thích ngược với các bản nhạc mẫu cũ)
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // 3. RESTFUL API ROUTES
-app.use('/api/auth', require('./routes/authRoutes'));
-app.use('/api/songs', require('./routes/songRoutes'));
-app.use('/api/ai', require('./routes/aiRoutes'));
-app.use('/api/forum', require('./routes/forumRoutes'));
-app.use('/api/comments', require('./routes/commentRoutes'));
-app.use('/api/rankings', require('./routes/rankingRoutes'));
-app.use('/api/competitions', require('./routes/competitionRoutes'));
+app.use("/api/auth", require("./src/routes/authRoutes"));
+app.use("/api/songs", require("./src/routes/songRoutes"));
+app.use("/api/ai", require("./src/routes/aiRoutes"));
+app.use("/api/forum", require("./src/routes/forumRoutes"));
+app.use("/api/comments", require("./src/routes/commentRoutes"));
+app.use("/api/rankings", require("./src/routes/rankingRoutes"));
+app.use("/api/competitions", require("./src/routes/competitionRoutes"));
 
 // Route kiểm tra trạng thái Server
-app.get('/', (req, res) => {
+app.get("/", (req, res) => {
   res.send(`🚀 SongHomie RESTful API Server đang chạy trên cổng ${PORT}`);
 });
 
-app.get('/api/health', (req, res) => {
+app.get("/api/health", (req, res) => {
   res.json({
     success: true,
-    message: '🚀 SongHomie RESTful API Server đang hoạt động ổn định!',
+    message: "🚀 SongHomie RESTful API Server đang hoạt động ổn định!",
     timestamp: new Date().toISOString(),
   });
 });
@@ -49,16 +54,16 @@ app.use((req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error('❌ Server Error:', err.message);
+  console.error("❌ Server Error:", err.message);
   res.status(err.status || 500).json({
     success: false,
-    message: err.message || 'Lỗi máy chủ nội bộ',
+    message: err.message || "Lỗi máy chủ nội bộ",
   });
 });
 
 // 5. KHỞI ĐỘNG SERVER
 app.listen(PORT, () => {
-  console.log('=================================');
+  console.log("=================================");
   console.log(`🚀 SongHomie API running on: http://localhost:${PORT}`);
-  console.log('=================================');
+  console.log("=================================");
 });

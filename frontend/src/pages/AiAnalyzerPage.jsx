@@ -29,6 +29,7 @@ export default function AiAnalyzerPage() {
   const [videoUrl, setVideoUrl] = useState("");
   const [audioFile, setAudioFile] = useState(null);
   const [aiResult, setAiResult] = useState(null);
+  const [editableLyrics, setEditableLyrics] = useState("");
   const [aiAudioUrl, setAiAudioUrl] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
 
@@ -62,6 +63,7 @@ export default function AiAnalyzerPage() {
 
     setAiLoading(true);
     setAiResult(null);
+    setEditableLyrics("");
     try {
       const formData = new FormData();
       formData.append("audio", audioFile);
@@ -70,7 +72,13 @@ export default function AiAnalyzerPage() {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
-      setAiResult(res.data.aiData);
+      const data = res.data.aiData;
+      setAiResult(data);
+      setEditableLyrics(
+        data?.lyricsChords ||
+          data?.lyricsAi ||
+          JSON.stringify(data?.chordsAi || [], null, 2),
+      );
       setAiAudioUrl(res.data.audioUrl || "");
       if (!aiSongTitle) {
         setAiSongTitle(audioFile.name.replace(/\.[^/.]+$/, ""));
@@ -94,11 +102,20 @@ export default function AiAnalyzerPage() {
 
     setAiLoading(true);
     setAiResult(null);
+    setEditableLyrics("");
     setAiAudioUrl("");
     try {
       const res = await API.post("/ai/from-youtube", { videoUrl });
-      setAiResult(res.data.data);
-      if (!aiSongTitle) {
+      const data = res.data.data;
+      setAiResult(data);
+      setEditableLyrics(
+        data?.lyricsChords ||
+          data?.lyricsAi ||
+          JSON.stringify(data?.chordsAi || [], null, 2),
+      );
+      if (!aiSongTitle && data?.detectedTitle) {
+        setAiSongTitle(data.detectedTitle);
+      } else if (!aiSongTitle) {
         setAiSongTitle("YouTube AI Chord Sheet");
       }
     } catch (err) {
@@ -121,6 +138,23 @@ export default function AiAnalyzerPage() {
 
     setAiSaving(true);
     try {
+      const editedLines = editableLyrics
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      const updatedTimeline = Array.isArray(aiResult.timeline)
+        ? aiResult.timeline.map((item, idx) => {
+            if (!editedLines[idx]) return item;
+            const chordMatch = editedLines[idx].match(/^\[([^\]]+)\]\s*(.*)$/);
+            return {
+              ...item,
+              chord: chordMatch ? chordMatch[1] : item.chord,
+              text: chordMatch ? chordMatch[2] : editedLines[idx],
+            };
+          })
+        : [];
+
       const payload = {
         title: aiSongTitle.trim() || "AI Transcribed Song",
         artist: aiSongArtist.trim() || "AI Studio",
@@ -130,9 +164,9 @@ export default function AiAnalyzerPage() {
         youtubeId:
           aiSourceMode === "youtube" ? extractYoutubeId(videoUrl) : undefined,
         chordsAi: aiResult.chordsAi || [],
-        timeline: aiResult.timeline || [],
-        lyricsChords: aiResult.lyricsChords || aiResult.lyricsAi || "",
-        lyricsAi: aiResult.lyricsAi || "",
+        timeline: updatedTimeline,
+        lyricsChords: editableLyrics || aiResult.lyricsChords || aiResult.lyricsAi || "",
+        lyricsAi: editableLyrics || aiResult.lyricsAi || "",
         lyricAlign: "left",
         type: "generated",
         vibeTag: "Góc AI Sáng Tác",
@@ -247,8 +281,9 @@ export default function AiAnalyzerPage() {
             <div className="flex gap-2 bg-slate-100 p-1 rounded-xl text-xs font-bold">
               <button
                 type="button"
+                disabled={aiLoading}
                 onClick={() => setAiSourceMode("audio")}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg transition cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg transition cursor-pointer disabled:opacity-50 ${
                   aiSourceMode === "audio"
                     ? "bg-slate-900 text-white"
                     : "text-slate-600 hover:text-slate-900"
@@ -258,8 +293,9 @@ export default function AiAnalyzerPage() {
               </button>
               <button
                 type="button"
+                disabled={aiLoading}
                 onClick={() => setAiSourceMode("youtube")}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg transition cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg transition cursor-pointer disabled:opacity-50 ${
                   aiSourceMode === "youtube"
                     ? "bg-rose-600 text-white"
                     : "text-slate-600 hover:text-slate-900"
@@ -287,6 +323,7 @@ export default function AiAnalyzerPage() {
                 <input
                   type="file"
                   accept="audio/*"
+                  disabled={aiLoading}
                   onChange={(e) => setAudioFile(e.target.files[0])}
                   className="hidden"
                 />
@@ -295,11 +332,16 @@ export default function AiAnalyzerPage() {
               <button
                 type="submit"
                 disabled={aiLoading}
-                className="w-full py-4 bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-2xl shadow-lg shadow-indigo-500/25 transition disabled:opacity-50 text-sm cursor-pointer"
+                className="w-full py-4 bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-2xl shadow-lg shadow-indigo-500/25 transition disabled:opacity-80 text-sm flex items-center justify-center gap-2.5 cursor-pointer"
               >
-                {aiLoading
-                  ? "Đang chạy Python AI & tải lên Cloudinary..."
-                  : "Bắt đầu phân tích File Nhạc"}
+                {aiLoading ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>AI đang phân tích bạn chờ chút nhé :&lt;&lt;</span>
+                  </>
+                ) : (
+                  <span>Bắt đầu phân tích File Nhạc</span>
+                )}
               </button>
             </form>
           ) : (
@@ -309,29 +351,69 @@ export default function AiAnalyzerPage() {
                 type="text"
                 placeholder="https://www.youtube.com/watch?v=..."
                 value={videoUrl}
+                disabled={aiLoading}
                 onChange={(e) => setVideoUrl(e.target.value)}
-                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm disabled:opacity-60"
                 required
               />
               <button
                 type="submit"
                 disabled={aiLoading}
-                className="w-full py-4 bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-2xl shadow-lg shadow-indigo-500/25 transition disabled:opacity-50 text-sm cursor-pointer"
+                className="w-full py-4 bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-2xl shadow-lg shadow-indigo-500/25 transition disabled:opacity-80 text-sm flex items-center justify-center gap-2.5 cursor-pointer"
               >
-                {aiLoading
-                  ? "AI Model đang bóc tách từ YouTube..."
-                  : "Bắt đầu phân tích YouTube"}
+                {aiLoading ? (
+                  <>
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>AI đang phân tích bạn chờ chút nhé :&lt;&lt;</span>
+                  </>
+                ) : (
+                  <span>Bắt đầu phân tích YouTube</span>
+                )}
               </button>
             </form>
+          )}
+
+          {/* Khung hoạt ảnh loading trực quan để người dùng biết hệ thống đang chạy */}
+          {aiLoading && (
+            <div className="p-6 rounded-2xl bg-linear-to-br from-indigo-50 via-purple-50 to-sky-50 border border-indigo-200/80 flex flex-col items-center text-center space-y-3.5 shadow-inner">
+              <div className="flex items-end justify-center gap-1.5 h-9">
+                <span className="w-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:-0.3s] h-4" />
+                <span className="w-1.5 bg-purple-500 rounded-full animate-bounce [animation-delay:-0.15s] h-7" />
+                <span className="w-1.5 bg-sky-500 rounded-full animate-bounce h-9" />
+                <span className="w-1.5 bg-purple-500 rounded-full animate-bounce [animation-delay:-0.15s] h-6" />
+                <span className="w-1.5 bg-indigo-500 rounded-full animate-bounce [animation-delay:-0.3s] h-4" />
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-base font-extrabold text-indigo-900">
+                  AI đang phân tích bạn chờ chút nhé :&lt;&lt;
+                </p>
+                <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
+                  {aiSourceMode === "youtube"
+                    ? "Đang tải âm thanh từ YouTube, nhận diện hợp âm Guitar và đồng bộ lời bài hát..."
+                    : "Đang quét hợp âm theo từng nhịp, đồng bộ lời bài hát và tải file lên Cloudinary..."}
+                </p>
+              </div>
+
+              <div className="w-full max-w-xs h-1.5 bg-indigo-200/70 rounded-full overflow-hidden">
+                <div className="h-full w-2/3 bg-linear-to-r from-indigo-500 via-purple-500 to-sky-500 rounded-full animate-pulse" />
+              </div>
+            </div>
           )}
 
           {/* Hiển thị kết quả AI + Form lưu sang màn hình Đàn Guitar */}
           {aiResult && (
             <div className="pt-6 border-t border-slate-100 space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-lg font-extrabold text-slate-800">
-                  ✨ Kết quả bóc tách từ AI
-                </h3>
+                <div>
+                  <h3 className="text-lg font-extrabold text-slate-800">
+                    ✨ Kết quả bóc tách từ AI
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Bạn có thể bấm trực tiếp vào khung dưới để chỉnh sửa nếu cần
+                    trước khi lưu.
+                  </p>
+                </div>
                 {aiAudioUrl && (
                   <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
                     ✓ Đã lưu audio trên Cloudinary
@@ -339,19 +421,17 @@ export default function AiAnalyzerPage() {
                 )}
               </div>
 
-              {/* Nghe thử nếu có file audio */}
               {aiAudioUrl && (
                 <audio controls src={aiAudioUrl} className="w-full h-10" />
               )}
 
-              {/* Khung xem lời & hợp âm AI */}
-              <div className="bg-slate-950 text-emerald-400 p-6 rounded-2xl font-mono text-sm whitespace-pre-wrap max-h-72 overflow-y-auto">
-                {aiResult.lyricsChords ||
-                  aiResult.lyricsAi ||
-                  JSON.stringify(aiResult.chordsAi, null, 2)}
-              </div>
+              <textarea
+                rows={10}
+                value={editableLyrics}
+                onChange={(e) => setEditableLyrics(e.target.value)}
+                className="w-full bg-slate-950 text-emerald-400 p-6 rounded-2xl font-mono text-sm leading-relaxed border border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+              />
 
-              {/* Lưu bài hát để mở giao diện Đàn Guitar điểm sáng xanh nhạt */}
               <div className="bg-sky-50/70 border border-sky-200 rounded-2xl p-5 space-y-4">
                 <p className="text-xs font-bold text-sky-900">
                   Lưu bản phân tích này vào thư viện để luyện tập cùng cần đàn
@@ -491,7 +571,6 @@ export default function AiAnalyzerPage() {
             </div>
           </div>
 
-          {/* Đính kèm Ảnh bìa & File nhạc Cloudinary (tùy chọn) */}
           <div className="grid md:grid-cols-2 gap-3">
             <label className="flex items-center gap-2 p-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-xs text-slate-600 cursor-pointer hover:border-indigo-400">
               <Upload className="w-4 h-4 text-indigo-500 shrink-0" />
