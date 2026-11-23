@@ -1,145 +1,621 @@
 # -*- coding: utf-8 -*-
 import sys
-import json
 import os
+import re
 import io
+import json
+import uuid
+import shutil
+import tempfile
+import warnings
+import urllib.request
+import urllib.parse
 import numpy as np
 
-# Đảm bảo đầu ra stdout luôn là UTF-8 để Node.js không bị lỗi mã hóa font tiếng Việt
-if hasattr(sys.stdout, 'buffer'):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+warnings.filterwarnings("ignore")
 
-PITCHES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+if hasattr(sys.stdout, "buffer"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+if hasattr(sys.stderr, "buffer"):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
 
-def _norm_template(vec):
-    v = np.maximum(vec, 0)
-    s = np.linalg.norm(v)
-    return v / s if s > 1e-9 else v
+PITCHES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+SUPPORTED_LANGUAGES = {"vi", "en", "ko", "ja", "zh"}
 
-def get_chord_templates():
-    templates = []
-    for i in range(12):
-        # Major (Hợp âm Trưởng)
-        t = np.zeros(12); t[i]=1.0; t[(i+4)%12]=0.85; t[(i+7)%12]=0.85
-        templates.append((PITCHES[i], _norm_template(t)))
-        # Minor (Hợp âm Thứ)
-        t = np.zeros(12); t[i]=1.0; t[(i+3)%12]=0.85; t[(i+7)%12]=0.85
-        templates.append((PITCHES[i]+"m", _norm_template(t)))
-    return templates
+HALLUCINATION_PATTERNS = [
+    r"subscribe",
+    r"đăng\s*ký\s*kênh",
+    r"ghiền\s*mì\s*gõ",
+    r"la\s*la\s*school",
+    r"video\s*hấp\s*dẫn",
+    r"theo\s*dõi\s*kênh",
+    r"bản\s*quyền\s*thuộc\s*về",
+    r"cảm\s*ơn\s*các\s*bạn\s*đã\s*theo\s*dõi",
+    r"thanks?\s+for\s+watching",
+    r"please\s+subscribe",
+    r"subtitles\s+by",
+    r"captioned\s+by",
+    r"시청해\s*주셔서\s*감사합니다",
+    r"구독과\s*좋아요",
+    r"자막\s*제공",
+    r"ご視聴ありがとう",
+    r"チャンネル登録",
+    r"字幕制作",
+    r"请不吝点赞",
+    r"订阅.*转发",
+    r"感谢观看",
+    r"字幕由.*提供",
+]
 
-CHORD_TEMPLATES = get_chord_templates()
+NOISE_SEGMENT_PATTERNS = [
+    r"^official\s*(mv|m/v|music\s*video|audio|video|lyric\s*video|visualizer)?$",
+    r"^m/?v$",
+    r"^lyrics?(\s*video)?$",
+    r"^audio$",
+    r"^visualizer$",
+    r"^teaser$",
+    r"^trailer$",
+    r"^karaoke$",
+    r"^beat$",
+    r"^instrumental$",
+    r"^hd$",
+    r"^4k$",
+]
 
-def _get_faster_whisper_model():
+
+def _is_hallucinated_subtitle(text):
+    lowered = text.lower().strip()
+    if len(lowered) < 1:
+        return True
+    if len(lowered) == 1 and re.match(r"^[a-zA-Z0-9\W]$", lowered):
+        return True
+    return any(re.search(pattern, lowered) for pattern in HALLUCINATION_PATTERNS)
+
+
+def _strip_noise_words(text):
+    if not text:
+        return ""
+    cleaned = re.sub(r"[「」『』《》〈〉]", " ", text)
+    cleaned = re.sub(r"\([^)]*\)|\[[^\]]*\]|【[^】]*】", " ", cleaned)
+    inline_noise = [
+        r"\bofficial\s*(mv|m/v|music\s*video|audio|video|lyric\s*video|visualizer)?\b",
+        r"\blyrics?(\s*video)?\b",
+        r"\bM/?V\b",
+        r"\bHD\b",
+        r"\b4K\b",
+        r"\bprod\.?.*$",
+        r"\bft\.?\b",
+        r"\bfeat\.?\b",
+    ]
+    for pattern in inline_noise:
+        cleaned = re.sub(pattern, " ", cleaned, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _build_search_candidates(yt_meta, fallback_title=""):
+    """Tạo danh sách từ khóa tìm kiếm thông minh từ tiêu đề YouTube (giữ cả phần sau dấu |)."""
+    candidates = []
+
+    def add_candidate(val):
+        cleaned = _strip_noise_words(val)
+        if len(cleaned) >= 2 and cleaned.lower() not in {c.lower() for c in candidates}:
+            candidates.append(cleaned)
+
+    track = (yt_meta or {}).get("track", "")
+    artist = (yt_meta or {}).get("artist", "")
+    raw_title = (yt_meta or {}).get("title", "") or fallback_title
+
+    if track and artist:
+        add_candidate(f"{track} {artist}")
+    if track:
+        add_candidate(track)
+
+    # Tách các phần ngăn bởi | hoặc // (VD: "SƠN TÙNG M-TP | EM CỦA NGÀY HÔM QUA | OFFICIAL MV")
+    parts = [p.strip() for p in re.split(r"\s*(?:\||//)\s*", raw_title) if p.strip()]
+    meaningful_parts = []
+    for part in parts:
+        clean_part = _strip_noise_words(part)
+        if not clean_part:
+            continue
+        if any(re.match(pat, clean_part, flags=re.IGNORECASE) for pat in NOISE_SEGMENT_PATTERNS):
+            continue
+        meaningful_parts.append(clean_part)
+
+    # Nếu có dạng "Ca sĩ | Tên bài hát", ưu tiên phần thứ 2 (tên bài hát) và tổ hợp cả 2
+    if len(meaningful_parts) >= 2:
+        add_candidate(meaningful_parts[1])
+        add_candidate(f"{meaningful_parts[1]} {meaningful_parts[0]}")
+        add_candidate(" ".join(meaningful_parts[:2]))
+    for p in meaningful_parts:
+        add_candidate(p)
+
+    # Xử lý thêm trường hợp ngăn bằng dấu gạch ngang "Ca sĩ - Tên bài hát"
+    if " - " in raw_title:
+        dash_parts = [p.strip() for p in raw_title.split(" - ") if p.strip()]
+        for dp in reversed(dash_parts):
+            add_candidate(dp)
+
+    add_candidate(re.sub(r"[-_|/]+", " ", raw_title))
+    return candidates
+
+
+def _parse_lrc_lyrics(synced_lrc):
+    """Chuyển đổi chuỗi định dạng LRC ([mm:ss.xx] Lời) sang danh sách mốc thời gian."""
+    if not synced_lrc:
+        return []
+    segments = []
+    for line in synced_lrc.splitlines():
+        match = re.match(r"^\[(\d+):(\d+(?:\.\d+)?)\]\s*(.*)$", line.strip())
+        if match:
+            mins = int(match.group(1))
+            secs = float(match.group(2))
+            text = match.group(3).strip()
+            if text and not text.startswith(("♪", "♫", "[", "(")):
+                segments.append({
+                    "start": round(mins * 60 + secs, 2),
+                    "text": text,
+                })
+    return segments
+
+
+def _detect_first_vocal_time(y, sr, librosa):
+    """Dò nhanh giây đầu tiên có giọng hát trong video (xử lý MV có đoạn kịch intro dài)."""
+    try:
+        from faster_whisper.vad import get_speech_timestamps, VadOptions
+
+        y_16k = librosa.resample(y, orig_sr=sr, target_sr=16000).astype(np.float32) if sr != 16000 else y.astype(np.float32)
+        speech_chunks = get_speech_timestamps(
+            y_16k,
+            VadOptions(min_silence_duration_ms=800, speech_pad_ms=200),
+        )
+        if speech_chunks:
+            return round(float(speech_chunks[0]["start"]) / 16000.0, 2)
+    except Exception:
+        pass
+    return None
+
+
+def _fetch_synced_lyrics_from_lrclib(yt_meta, fallback_title=""):
+    """Tầng 1: Tra cứu lời bài hát gốc chuẩn 100% từ LRCLIB qua nhiều ứng viên từ khóa."""
+    candidates = _build_search_candidates(yt_meta, fallback_title)
+    if not candidates:
+        return [], ""
+
+    best_query_used = candidates[0]
+    for query in candidates[:5]:
+        try:
+            encoded_q = urllib.parse.quote(query)
+            url = f"https://lrclib.net/api/search?q={encoded_q}"
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": "Songhomie/1.0 (https://songhomie.app)"},
+            )
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                if resp.status != 200:
+                    continue
+                items = json.loads(resp.read().decode("utf-8"))
+                if not isinstance(items, list):
+                    continue
+
+                for item in items:
+                    synced = item.get("syncedLyrics")
+                    if synced:
+                        parsed = _parse_lrc_lyrics(synced)
+                        if len(parsed) >= 4:
+                            detected_name = item.get("trackName") or query
+                            return parsed, detected_name
+        except Exception as e:
+            sys.stderr.write(f"[DEBUG] LRCLIB query '{query}' skipped: {e}\n")
+
+    return [], best_query_used
+
+
+def _polish_lyrics_with_llm(segments, song_title="", lang_code="auto"):
+    """Tầng 3 (Tùy chọn): Hiệu đính chính tả bằng Gemini/Groq nếu chạy Whisper."""
+    if not segments:
+        return segments
+
+    gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+    if not gemini_key and not groq_key:
+        return segments
+
+    lang_labels = {
+        "vi": "Vietnamese",
+        "en": "English",
+        "ko": "Korean",
+        "ja": "Japanese",
+        "zh": "Chinese",
+    }
+    target_lang = lang_labels.get(lang_code, "the original language of the song")
+
+    numbered_lines = "\n".join(f"{i}: {s['text']}" for i, s in enumerate(segments))
+    prompt = (
+        f"You are a professional music lyric editor. Below are raw ASR-transcribed lyrics for the song '{song_title}' in {target_lang}.\n"
+        "Fix spelling, diacritic, and homophone errors caused by singing pronunciation while preserving the exact original language.\n"
+        "STRICT RULES: Keep the exact 'number: ' prefix at the beginning of each line, do not add or remove lines, and output nothing else.\n\n"
+        f"{numbered_lines}"
+    )
+
+    try:
+        corrected_text = ""
+        if gemini_key:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+            body = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
+            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                corrected_text = data["candidates"][0]["content"]["parts"][0]["text"]
+        elif groq_key:
+            url = "https://api.groq.com/openai/v1/chat/completions"
+            body = json.dumps({
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.2,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {groq_key}",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                corrected_text = data["choices"][0]["message"]["content"]
+
+        if corrected_text:
+            updated = [dict(s) for s in segments]
+            for line in corrected_text.splitlines():
+                m = re.match(r"^(\d+)\s*:\s*(.+)$", line.strip())
+                if m:
+                    idx = int(m.group(1))
+                    if 0 <= idx < len(updated):
+                        updated[idx]["text"] = m.group(2).strip()
+            return updated
+    except Exception as e:
+        sys.stderr.write(f"[DEBUG] LLM polish skipped: {e}\n")
+
+    return segments
+
+
+def _ensure_ffmpeg_in_path():
+    existing = shutil.which("ffmpeg")
+    if existing:
+        return os.path.dirname(existing)
+
+    local_app_data = os.environ.get("LOCALAPPDATA", "")
+    winget_links = os.path.join(local_app_data, "Microsoft", "WinGet", "Links", "ffmpeg.exe")
+    if os.path.exists(winget_links):
+        ffmpeg_dir = os.path.dirname(winget_links)
+        os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+        return ffmpeg_dir
+
+    winget_packages = os.path.join(local_app_data, "Microsoft", "WinGet", "Packages")
+    if os.path.isdir(winget_packages):
+        for root, _, files in os.walk(winget_packages):
+            if "ffmpeg.exe" in files:
+                os.environ["PATH"] = root + os.pathsep + os.environ.get("PATH", "")
+                return root
+
+    return None
+
+
+def _convert_to_wav_fallback(input_path):
+    import av
+    import soundfile as sf
+
+    wav_path = f"{os.path.splitext(input_path)[0]}_decoded.wav"
+    container = av.open(input_path)
+    resampler = av.AudioResampler(format="flt", layout="mono", rate=22050)
+    chunks = []
+
+    for frame in container.decode(audio=0):
+        for resampled in resampler.resample(frame):
+            chunks.append(resampled.to_ndarray().reshape(-1))
+    for resampled in resampler.resample(None):
+        chunks.append(resampled.to_ndarray().reshape(-1))
+
+    container.close()
+    if not chunks:
+        raise RuntimeError("Không giải mã được dữ liệu âm thanh từ file tải về")
+
+    audio_data = np.concatenate(chunks)
+    sf.write(wav_path, audio_data, 22050)
+    return wav_path
+
+
+def _build_chord_templates():
+    names = []
+    vectors = []
+    for i, root in enumerate(PITCHES):
+        maj = np.zeros(12, dtype=np.float32)
+        maj[i] = 1.0
+        maj[(i + 4) % 12] = 0.85
+        maj[(i + 7) % 12] = 0.85
+        names.append(root)
+        vectors.append(maj / np.linalg.norm(maj))
+
+        minor = np.zeros(12, dtype=np.float32)
+        minor[i] = 1.0
+        minor[(i + 3) % 12] = 0.85
+        minor[(i + 7) % 12] = 0.85
+        names.append(f"{root}m")
+        vectors.append(minor / np.linalg.norm(minor))
+
+    return names, np.vstack(vectors)
+
+
+CHORD_NAMES, CHORD_MATRIX = _build_chord_templates()
+
+
+def _download_youtube_audio(url):
+    """Tải audio từ YouTube, trích xuất metadata (title, track, artist) và chuẩn hóa WAV."""
+    import yt_dlp
+
+    ffmpeg_dir = _ensure_ffmpeg_in_path()
+    temp_dir = tempfile.gettempdir()
+    file_id = uuid.uuid4().hex[:10]
+    out_tpl = os.path.join(temp_dir, f"songhomie_yt_{file_id}.%(ext)s")
+
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": out_tpl,
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "js_runtimes": {"node": {}},
+    }
+
+    if ffmpeg_dir:
+        ydl_opts["ffmpeg_location"] = ffmpeg_dir
+        ydl_opts["postprocessors"] = [
+            {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "wav",
+            }
+        ]
+
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        yt_meta = {
+            "title": info.get("title", ""),
+            "track": info.get("track", ""),
+            "artist": info.get("artist", "") or info.get("creator", ""),
+        }
+        raw_filename = ydl.prepare_filename(info)
+        wav_filename = f"{os.path.splitext(raw_filename)[0]}.wav"
+
+        if os.path.exists(wav_filename):
+            return wav_filename, [wav_filename, raw_filename], yt_meta
+
+        decoded_wav = _convert_to_wav_fallback(raw_filename)
+        return decoded_wav, [decoded_wav, raw_filename], yt_meta
+
+
+def _extract_chords_and_tempo(y, sr, librosa):
+    y_harmonic = librosa.effects.harmonic(y, margin=3.0)
+    chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr)
+
+    tempo, beat_frames = librosa.beat.beat_track(y=y_harmonic, sr=sr)
+    if len(beat_frames) < 2:
+        duration = librosa.get_duration(y=y, sr=sr)
+        beat_frames = librosa.time_to_frames(np.arange(0, max(duration, 2.0), 2.0), sr=sr)
+
+    beat_chroma = librosa.util.sync(chroma, beat_frames, aggregate=np.median)
+    fixed_frames = librosa.util.fix_frames(beat_frames, x_min=0, x_max=chroma.shape[1])
+    beat_times = librosa.frames_to_time(fixed_frames, sr=sr)
+
+    norms = np.linalg.norm(beat_chroma, axis=0, keepdims=True)
+    valid_mask = norms[0] > 1e-9
+    beat_chroma_norm = np.divide(beat_chroma, norms, out=np.zeros_like(beat_chroma), where=norms > 1e-9)
+
+    similarities = CHORD_MATRIX @ beat_chroma_norm
+    best_indices = np.argmax(similarities, axis=0)
+    best_scores = similarities[best_indices, np.arange(similarities.shape[1])]
+
+    chords_output = []
+    last_chord = None
+    num_segments = min(len(best_indices), len(beat_times))
+
+    for idx in range(num_segments):
+        if not valid_mask[idx] or best_scores[idx] <= 0.42:
+            continue
+        chord = CHORD_NAMES[best_indices[idx]]
+        if chord != last_chord:
+            chords_output.append({
+                "time": round(float(beat_times[idx]), 2),
+                "chord": chord,
+            })
+            last_chord = chord
+
+    if not chords_output:
+        chords_output = [{"time": 0.0, "chord": "C"}]
+
+    calc_tempo = round(float(tempo), 2) if np.isscalar(tempo) else round(float(tempo[0]), 2)
+    return chords_output, calc_tempo
+
+
+def _transcribe_with_whisper_fast(y, sr, librosa, song_title="", lang_code="auto"):
+    """Tầng 2: Chép lời bằng Faster-Whisper cho bài chưa có trên LRCLIB."""
     try:
         from faster_whisper import WhisperModel
-        return WhisperModel("base", device="cpu", compute_type="int8")
-    except Exception as e:
-        sys.stderr.write(f"[DEBUG] Faster-Whisper Load Warning: {e}\n")
-        return None
 
-def _match_chord(chroma_vec, templates):
-    v = np.maximum(chroma_vec.astype(float), 0)
-    nv = np.linalg.norm(v)
-    if nv < 1e-9: return None
-    v /= nv
-    best_name, best_sim = None, -1.0
-    for name, t in templates:
-        sim = float(np.dot(v, t))
-        if sim > best_sim:
-            best_sim, best_name = sim, name
-    return best_name if best_sim > 0.4 else None
+        y_16k = librosa.resample(y, orig_sr=sr, target_sr=16000).astype(np.float32) if sr != 16000 else y.astype(np.float32)
+        whisper_lang = lang_code if lang_code in SUPPORTED_LANGUAGES else None
 
-def _transcribe_audio(file_path):
-    model = _get_faster_whisper_model()
-    if not model: 
-        return []
-    
-    try:
-        segments, _ = model.transcribe(
-            file_path, 
-            language="vi", 
-            beam_size=5,
-            repetition_penalty=1.2,          # Chống lặp từ
-            condition_on_previous_text=False # Chống ảo giác dựa trên câu trước
+        model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
+        segments, info = model.transcribe(
+            y_16k,
+            language=whisper_lang,
+            beam_size=3,
+            vad_filter=True,
+            vad_parameters=dict(min_silence_duration_ms=800, speech_pad_ms=300),
+            no_speech_threshold=0.6,
+            log_prob_threshold=-1.0,
+            compression_ratio_threshold=2.4,
+            condition_on_previous_text=False,
         )
-        return [{"start": round(s.start, 2), "text": s.text.strip()} for s in segments]
-    except Exception as e:
-        sys.stderr.write(f"[DEBUG] Transcription Error: {e}\n")
-        return []
 
-def analyze_audio(file_path):
+        detected_lang = whisper_lang or getattr(info, "language", "auto")
+
+        results = []
+        for s in segments:
+            text = (s.text or "").strip()
+            no_speech_prob = getattr(s, "no_speech_prob", 0.0)
+            if not text or no_speech_prob > 0.65 or _is_hallucinated_subtitle(text):
+                continue
+            results.append({"start": round(float(s.start), 2), "text": text})
+
+        results = _polish_lyrics_with_llm(results, song_title, detected_lang)
+        return results, detected_lang, None
+    except Exception as e:
+        sys.stderr.write(f"[DEBUG] Faster-Whisper Warning: {e}\n")
+        return [], lang_code, str(e)
+
+
+def _format_synced_lyrics(lyrics_segments, chords_output):
+    if not lyrics_segments:
+        return "\n".join(
+            f"[{c['time']}s] ({c['chord']}) [Beat Marker]" for c in chords_output
+        )
+
+    lines = []
+    chord_idx = 0
+    current_chord = chords_output[0]["chord"] if chords_output else "C"
+
+    for seg in lyrics_segments:
+        start_time = seg["start"]
+        while chord_idx + 1 < len(chords_output) and chords_output[chord_idx + 1]["time"] <= start_time:
+            chord_idx += 1
+            current_chord = chords_output[chord_idx]["chord"]
+
+        mins = int(start_time // 60)
+        secs = start_time % 60
+        lines.append(f"[{mins:02d}:{secs:05.2f}] ({current_chord}) {seg['text']}")
+
+    return "\n".join(lines)
+
+
+def _mock_fallback():
+    return {
+        "success": True,
+        "isMock": True,
+        "tempo": 120,
+        "chords": [
+            {"time": 0.0, "chord": "C"},
+            {"time": 4.0, "chord": "G"},
+            {"time": 8.0, "chord": "Am"},
+            {"time": 12.0, "chord": "F"},
+        ],
+        "lyrics": (
+            "[00:00.00] (C) Nắng vàng góc phố quen\n"
+            "[00:04.00] (G) Tiếng đàn cất lên êm đềm\n"
+            "[00:08.00] (Am) Songhomie ghi lại giai điệu\n"
+            "[00:12.00] (F) Trao nhau từng nốt nhạc yêu thương"
+        ),
+    }
+
+
+def analyze_audio(input_target, lang_code="auto"):
+    temp_files = []
     try:
+        _ensure_ffmpeg_in_path()
+        file_path = input_target
+        yt_meta = {}
+        fallback_title = ""
+        normalized_lang = (lang_code or "auto").strip().lower()
+
+        if input_target.startswith(("http://", "https://")):
+            try:
+                file_path, temp_files, yt_meta = _download_youtube_audio(input_target)
+                fallback_title = yt_meta.get("title", "")
+            except Exception as yt_err:
+                return {
+                    "success": False,
+                    "error": f"Không tải được audio từ YouTube: {str(yt_err)}",
+                }
+        else:
+            fallback_title = os.path.splitext(os.path.basename(file_path))[0]
+
         if not os.path.exists(file_path):
             return {"success": False, "error": f"File không tồn tại: {file_path}"}
 
-        # Import librosa an toàn bên trong hàm
         import librosa
 
-        # 1. Load Audio (sr=22050 tối ưu tải CPU)
-        y, sr = librosa.load(file_path, sr=22050)
-        
-        # 2. Tách phần nhạc tính (Harmonic)
-        y_harmonic = librosa.effects.harmonic(y, margin=4)
-        chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr)
-        
-        # 3. Theo dõi nhịp (Beat Tracking)
-        tempo, beat_frames = librosa.beat.beat_track(y=y_harmonic, sr=sr)
-        
-        # 4. Trích xuất hợp âm theo nhịp
-        chords_output = []
-        beat_times = librosa.frames_to_time(beat_frames, sr=sr)
-        last_chord = None
-        for i in range(len(beat_frames)-1):
-            start, end = beat_frames[i], beat_frames[i+1]
-            mag = np.mean(chroma[:, start:end], axis=1)
-            chord = _match_chord(mag, CHORD_TEMPLATES)
-            if chord and chord != last_chord:
-                chords_output.append({"time": round(float(beat_times[i]), 2), "chord": chord})
-                last_chord = chord
+        try:
+            y, sr = librosa.load(file_path, sr=22050)
+        except Exception:
+            decoded_wav = _convert_to_wav_fallback(file_path)
+            temp_files.append(decoded_wav)
+            file_path = decoded_wav
+            y, sr = librosa.load(file_path, sr=22050)
 
-        # 5. Dịch lời bài hát bằng Faster-Whisper
-        lyrics_segments = _transcribe_audio(file_path)
-        
-        # 6. Gộp lời và hợp âm
-        full_lyrics_text = ""
+        chords_output, calc_tempo = _extract_chords_and_tempo(y, sr, librosa)
+
+        # Tầng 1: Lấy lời gốc chuẩn 100% từ LRCLIB + bù độ trễ đoạn kịch intro của MV
+        whisper_err = None
+        lyrics_source = "lrclib"
+        detected_lang = normalized_lang
+        lyrics_segments, matched_title = _fetch_synced_lyrics_from_lrclib(yt_meta, fallback_title)
+
         if lyrics_segments:
-            for s in lyrics_segments:
-                current_chord = "C"
-                for c in chords_output:
-                    if c["time"] <= s["start"]: current_chord = c["chord"]
-                    else: break
-                
-                time_str = f"[{int(s['start']//60):02d}:{s['start']%60:05.2f}]"
-                full_lyrics_text += f"{time_str} ({current_chord}) {s['text']}\n"
+            first_vocal = _detect_first_vocal_time(y, sr, librosa)
+            if first_vocal is not None:
+                intro_offset = round(first_vocal - lyrics_segments[0]["start"], 2)
+                if intro_offset > 4.0:
+                    for seg in lyrics_segments:
+                        seg["start"] = round(seg["start"] + intro_offset, 2)
         else:
-            # Fallback nếu chưa cài whisper: Hiện danh sách hợp âm
-            full_lyrics_text = "\n".join([f"[{c['time']}s] ({c['chord']}) [Beat Marker]" for c in chords_output])
+            lyrics_source = "whisper"
+            lyrics_segments, detected_lang, whisper_err = _transcribe_with_whisper_fast(
+                y, sr, librosa, matched_title or fallback_title, normalized_lang
+            )
 
-        calc_tempo = round(float(tempo), 2) if np.isscalar(tempo) else round(float(tempo[0]), 2)
+        full_lyrics_text = _format_synced_lyrics(lyrics_segments, chords_output)
 
         return {
             "success": True,
-            "lyrics": full_lyrics_text.strip(),
+            "lyrics": full_lyrics_text,
             "chords": chords_output,
-            "tempo": calc_tempo
+            "tempo": calc_tempo,
+            "lyricsSource": lyrics_source,
+            "detectedLanguage": detected_lang,
+            "detectedTitle": matched_title,
+            "whisperWarning": whisper_err,
         }
 
     except ImportError:
-        # Cơ chế dự phòng khi máy chưa pip install librosa
-        return {
-            "success": True,
-            "isMock": True,
-            "tempo": 120,
-            "chords": [{"time": 0.0, "chord": "C"}, {"time": 4.0, "chord": "G"}, {"time": 8.0, "chord": "Am"}, {"time": 12.0, "chord": "F"}],
-            "lyrics": "[00:00.00] (C) Nắng vàng góc phố quen\n[00:04.00] (G) Tiếng đàn cất lên êm đềm\n[00:08.00] (Am) Songhomie ghi lại giai điệu\n[00:12.00] (F) Trao nhau từng nốt nhạc yêu thương"
-        }
+        return _mock_fallback()
     except Exception as e:
         return {"success": False, "error": str(e)}
+    finally:
+        for f in set(temp_files):
+            if f and os.path.exists(f):
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
+
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         input_path = sys.argv[1]
-        result = analyze_audio(input_path)
-        print(json.dumps(result, ensure_ascii=False))
+        requested_lang = sys.argv[2] if len(sys.argv) > 2 else "auto"
+        real_stdout = sys.stdout
+        sys.stdout = sys.stderr
+        try:
+            result = analyze_audio(input_path, requested_lang)
+        finally:
+            sys.stdout = real_stdout
+        print(json.dumps(result, ensure_ascii=False), flush=True)
     else:
-        print(json.dumps({"success": False, "error": "Thiếu đường dẫn file âm thanh đầu vào"}))
+        print(
+            json.dumps(
+                {"success": False, "error": "Thiếu đường dẫn file âm thanh đầu vào"},
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
