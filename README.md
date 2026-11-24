@@ -53,23 +53,23 @@ CSBU109.R11.KHBC-Songhomie/
 ├── backend/                      # RESTful API Server & AI Service
 │   ├── src/
 │   │   ├── config/               # Cấu hình kết nối MongoDB Atlas & Cloudinary
-│   │   ├── controllers/          # Xử lý logic API (Auth, Songs, Rankings, Comments, AI)
+│   │   ├── controllers/          # Xử lý logic API (Auth, Songs, Rankings, Comments, 
 │   │   ├── middlewares/          # Xác thực JWT & xử lý Upload
-│   │   ├── models/               # Mongoose Schemas (User, Song, Comment, Competition, Playlist)
+│   │   ├── models/               # Mongoose Schemas (User, Song, Comment, 
 │   │   ├── routes/               # Khai báo Express API Endpoints
 │   │   ├── scripts/
-│   │   │   └── chord_analyzer.py # Python AI Engine (Librosa CQT, LRCLIB, Whisper, MDX-NET)
-│   │   ├── services/
-│   │   │   ├── aiService.js      # Quản lý tiến trình Python, Hàng đợi & Cache kết quả AI
-│   │   │   └── storageService.js # Tích hợp lưu trữ âm thanh Cloudinary
-│   │   └── server.js             # Entry point Express Server
+│   │   │   └── chord_analyzer.py # Python AI Engine (Librosa CQT, LRCLIB, Whisper, 
+│   │   └── services/
+│   │       ├── aiService.js      # Quản lý tiến trình Python, Hàng đợi & Cache kết 
+│   │       └── storageService.js # Tích hợp lưu trữ âm thanh Cloudinary
 │   ├── .env                      # Biến môi trường Server (không commit lên Git)
-│   └── package.json
+│   ├── package.json
+│   └── server.js                 # Entry point Express Server
 ├── frontend/                     # React + Vite Client Application
 │   ├── src/
-│   │   ├── components/           # UI Components (Navbar, Footer, GuitarFretboard, ...)
+│   │   ├── components/           # UI Components (Navbar, Footer, G)
 │   │   ├── context/              # AuthContext quản lý trạng thái đăng nhập
-│   │   ├── pages/                # Các trang giao diện (Home, AI Analyzer, SongDetail, Rankings, ...)
+│   │   ├── pages/                # Các trang giao diện (Home, AI Analyzer, 
 │   │   ├── services/             # Cấu hình Axios API Client
 │   │   ├── App.jsx               # Main Router Configuration
 │   │   └── main.jsx              # Entry point React Vite
