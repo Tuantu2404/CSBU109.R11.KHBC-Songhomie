@@ -1,16 +1,19 @@
-import axios from 'axios';
+import axios from "axios";
 
 const API = axios.create({
-  baseURL: 'http://localhost:3000/api', // Trỏ đúng cổng 3000 theo terminal
-  withCredentials: true,
+  baseURL: import.meta.env.VITE_API_URL || "http://localhost:3000/api",
+  timeout: 300000, // 5 phút để không bị ngắt kết nối khi AI tách vocal
 });
 
-API.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+API.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem("token");
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error),
+);
 
 export default API;
