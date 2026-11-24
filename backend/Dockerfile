@@ -32,4 +32,4 @@ ENV PYTHONIOENCODING=utf-8
 
 EXPOSE 3000
 
-CMD ["node", "src/server.js"]
+CMD ["node", "server.js"]
