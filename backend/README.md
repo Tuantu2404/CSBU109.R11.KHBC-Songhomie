@@ -8,6 +8,8 @@
 
 ## 🛠️ Getting Started
 
-### 1. Install Dependencies
+### 1. Install Dependencies And Start 
 ```bash
+cd backend
 npm install
+npm run dev
