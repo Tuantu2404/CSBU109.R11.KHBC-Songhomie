@@ -53,7 +53,6 @@ const songSchema = new mongoose.Schema(
     // --- BÓC TÁCH AI & ĐỒNG BỘ CẦN ĐÀN GUITAR ---
     youtubeId: {
       type: String,
-      unique: true,
       sparse: true,
     },
     chordsAi: [
@@ -69,8 +68,10 @@ const songSchema = new mongoose.Schema(
     timeline: [
       {
         time: { type: Number, required: true }, // Mốc giây câu hát bắt đầu (VD: 12.5)
+        end: Number,
         chord: { type: String, default: "" }, // Hợp âm tại thời điểm đó (VD: "Am")
         text: { type: String, default: "" }, // Lời câu hát tương ứng
+        isInstrumental: { type: Boolean, default: false },
       },
     ],
     type: {

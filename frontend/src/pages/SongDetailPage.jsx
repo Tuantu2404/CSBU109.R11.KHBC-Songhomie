@@ -53,6 +53,8 @@ function normalizeSongTimeline(timeline = []) {
     let chord = String(item.chord || '').trim();
     let text = String(item.text || '').trim();
     let time = Number(item.time);
+    const isInstrumental =
+      Boolean(item.isInstrumental) || text === 'Đoạn nhạc không lời';
 
     // Nếu chord bị lưu nhầm dạng "01:01.24" và text có dạng "(C#m) Yeh yeh yeh"
     const timeAsChord = chord.match(/^(\d+):(\d+(?:\.\d+)?)$/);
@@ -74,8 +76,9 @@ function normalizeSongTimeline(timeline = []) {
     return {
       ...item,
       time: Number.isNaN(time) ? idx * 4 : time,
-      chord: chord || 'C',
+      chord: isInstrumental ? '' : chord || 'C',
       text,
+      isInstrumental,
     };
   });
 }
@@ -163,33 +166,37 @@ export default function SongDetailPage() {
   const activeTimelineIndex = hasTimeline
     ? song.timeline.reduce((acc, item, idx) => (currentTime >= Number(item.time) ? idx : acc), 0)
     : -1;
+  const activeAiChordIndex = Array.isArray(song?.chordsAi) && song.chordsAi.length > 0
+    ? song.chordsAi.reduce(
+        (activeIndex, item, index) =>
+          currentTime >= Number(item.time) ? index : activeIndex,
+        0,
+      )
+    : -1;
 
   // 3. Đổi thế bấm trên cần đàn + tự động gảy tiếng đàn khi chuyển dòng lúc đang chạy tự động
   useEffect(() => {
-    if (hasTimeline && activeTimelineIndex >= 0) {
-      const currentChord = song.timeline[activeTimelineIndex]?.chord;
-      if (currentChord) setSelectedChord(currentChord);
+    const activeChordIndex = activeAiChordIndex >= 0
+      ? activeAiChordIndex
+      : activeTimelineIndex;
+    const activeChord = activeAiChordIndex >= 0
+      ? song.chordsAi[activeAiChordIndex]?.chord
+      : song?.timeline?.[activeTimelineIndex]?.chord;
 
-      if (isPlaying) {
-        // Gảy tiếng đàn Guitar mỗi khi bước sang dòng hợp âm mới (nếu bài không có MP3 gốc)
-        if (
-          !song?.audioPath &&
-          !song?.youtubeId &&
-          synthEnabled &&
-          lastPlayedIndexRef.current !== activeTimelineIndex
-        ) {
-          lastPlayedIndexRef.current = activeTimelineIndex;
-          setStrumTrigger((prev) => prev + 1);
-        }
-      }
-    } else if (song?.chordsAi?.length > 0 && currentTime > 0) {
-      const activeAi = song.chordsAi.reduce(
-        (acc, item) => (currentTime >= Number(item.time) ? item.chord : acc),
-        song.chordsAi[0].chord,
-      );
-      if (activeAi) setSelectedChord(activeAi);
+    if (activeChord) setSelectedChord(activeChord);
+
+    if (
+      isPlaying &&
+      !song?.audioPath &&
+      !song?.youtubeId &&
+      synthEnabled &&
+      activeChordIndex >= 0 &&
+      lastPlayedIndexRef.current !== activeChordIndex
+    ) {
+      lastPlayedIndexRef.current = activeChordIndex;
+      setStrumTrigger((prev) => prev + 1);
     }
-  }, [activeTimelineIndex, hasTimeline, currentTime, song, isPlaying, synthEnabled]);
+  }, [activeAiChordIndex, activeTimelineIndex, song, isPlaying, synthEnabled]);
 
   const handleTogglePlayback = () => {
     if (song?.youtubeId && youtubePlayerRef.current) {
@@ -418,8 +425,9 @@ export default function SongDetailPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         {/* --- CỘT TRÁI --- */}
-        {!isExpanded && (
-          <div className="lg:col-span-5 bg-white p-6 md:p-7 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col justify-between space-y-6">
+        <div
+          className={`${isExpanded ? 'hidden' : 'lg:col-span-5'} bg-white p-6 md:p-7 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col justify-between space-y-6`}
+        >
             <div className="space-y-4">
               <div className="aspect-video w-full rounded-2xl overflow-hidden bg-slate-900 border border-slate-200 flex items-center justify-center">
                 {song.coverUrl ? (
@@ -600,8 +608,7 @@ export default function SongDetailPage() {
                 </button>
               </div>
             </div>
-          </div>
-        )}
+        </div>
 
         {/* --- CỘT PHẢI: LỜI BÀI HÁT & ĐÀN GUITAR --- */}
         <div
@@ -663,7 +670,9 @@ export default function SongDetailPage() {
                     >
                       <div className="flex items-center gap-2.5">
                         <span className="text-xs font-mono text-slate-500">
-                          {formatTime(line.time)}
+                          {line.isInstrumental
+                            ? `${formatTime(line.time)} - ${formatTime(line.end)}`
+                            : formatTime(line.time)}
                         </span>
                         {lineChord && (
                           <span

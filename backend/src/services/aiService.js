@@ -18,14 +18,17 @@ const resultCache = new Map();
 const inFlightRequests = new Map();
 const MAX_CACHE_ITEMS = 100;
 
-function getCacheKey(targetInput, language, lyricMode, qualityMode) {
+function getCacheKey(targetInput, language, lyricMode, qualityMode, metadata = {}) {
   let normalizedTarget = targetInput.trim();
   if (!normalizedTarget.startsWith("http") && fs.existsSync(normalizedTarget)) {
     const fileBuffer = fs.readFileSync(normalizedTarget);
     const hash = crypto.createHash("md5").update(fileBuffer).digest("hex");
     normalizedTarget = `file_${hash}`;
   }
-  return `${normalizedTarget}|${language}|${lyricMode}|${qualityMode}`;
+  const normalizedMetadata = [metadata.trackTitle || "", metadata.artist || ""]
+    .map((value) => value.trim().toLowerCase())
+    .join("|");
+  return `${normalizedTarget}|${language}|${lyricMode}|${qualityMode}|${normalizedMetadata}`;
 }
 
 function saveToCache(key, value) {
@@ -73,14 +76,16 @@ const parseLyricsToTimeline = (lyricsText, fallbackChords = []) => {
 
   return lines.map((line, idx) => {
     const lrcMatch = line.match(
-      /^\[(\d+):(\d+(?:\.\d+)?)\]\s*\(([^)]+)\)\s*(.*)$/,
+      /^\[(\d+):(\d+(?:\.\d+)?)\]\s*(?:\(([^)]+)\)\s*)?(.*)$/,
     );
     if (lrcMatch) {
       const mins = parseInt(lrcMatch[1], 10);
       const secs = parseFloat(lrcMatch[2]);
       return {
         time: Number((mins * 60 + secs).toFixed(2)),
-        chord: lrcMatch[3].trim(),
+        chord:
+          lrcMatch[3]?.trim() ||
+          (lrcMatch[4].trim() ? fallbackChords[idx]?.chord || "" : ""),
         text: lrcMatch[4].trim(),
       };
     }
@@ -123,22 +128,38 @@ const formatAiOutput = (aiResult = {}) => {
 
   const lyricsText = aiResult.lyrics || aiResult.lyricsAi || "";
   const parsedTimeline = parseLyricsToTimeline(lyricsText, chords);
+  const timedLyricsTimeline = Array.isArray(aiResult.timedLyrics)
+    ? aiResult.timedLyrics.map((line) => ({
+        ...line,
+        time: Number(line.start),
+        chord: line.chord || "",
+        text: line.text || "",
+      }))
+    : [];
 
   const timeline =
     Array.isArray(aiResult.timeline) && aiResult.timeline.length > 0
       ? aiResult.timeline
+      : timedLyricsTimeline.length > 0
+        ? timedLyricsTimeline
       : parsedTimeline.length > 0
         ? parsedTimeline
         : chords.map((item, idx) => ({
             time: Number(item.time) || idx * 4,
             chord: item.chord || "C",
-            text: `Đoạn nhạc ${idx + 1} (${item.chord || "C"})`,
+            text: "",
           }));
 
   const lyricsChords =
     aiResult.lyricsChords ||
     lyricsText ||
-    timeline.map((row) => `[${row.chord}] ${row.text}`).join("\n");
+    timeline
+      .map((row) => {
+        const mins = Math.floor(Number(row.time || 0) / 60);
+        const secs = (Number(row.time || 0) % 60).toFixed(2).padStart(5, "0");
+        return `[${String(mins).padStart(2, "0")}:${secs}] (${row.chord}) ${row.text || ""}`.trimEnd();
+      })
+      .join("\n");
 
   return {
     ...aiResult,
@@ -179,11 +200,20 @@ const spawnPythonAnalyzer = (
   safeLang,
   safeMode,
   safeQuality,
+  metadata,
 ) => {
   return new Promise((resolve, reject) => {
     const pythonProcess = spawn(
       "python",
-      [SCRIPT_PATH, targetInput, safeLang, safeMode, safeQuality],
+      [
+        SCRIPT_PATH,
+        targetInput,
+        safeLang,
+        safeMode,
+        safeQuality,
+        metadata.trackTitle || "",
+        metadata.artist || "",
+      ],
       {
         env: { ...process.env, PYTHONIOENCODING: "utf-8" },
       },
@@ -239,11 +269,12 @@ const analyzeWithPython = (
   language = "auto",
   lyricMode = "search",
   qualityMode = "fast",
+  metadata = {},
 ) => {
   const safeLang = (language || "auto").trim();
   const safeMode = lyricMode === "transcribe" ? "transcribe" : "search";
   const safeQuality = qualityMode === "studio" ? "studio" : "fast";
-  const cacheKey = getCacheKey(targetInput, safeLang, safeMode, safeQuality);
+  const cacheKey = getCacheKey(targetInput, safeLang, safeMode, safeQuality, metadata);
 
   if (resultCache.has(cacheKey)) {
     return Promise.resolve({ ...resultCache.get(cacheKey), fromCache: true });
@@ -254,7 +285,7 @@ const analyzeWithPython = (
   }
 
   const jobPromise = enqueueAiTask(() =>
-    spawnPythonAnalyzer(targetInput, safeLang, safeMode, safeQuality),
+    spawnPythonAnalyzer(targetInput, safeLang, safeMode, safeQuality, metadata),
   )
     .then((formattedResult) => {
       saveToCache(cacheKey, formattedResult);
@@ -280,7 +311,8 @@ const analyzeAudio = (
   language = "auto",
   lyricMode = "search",
   qualityMode = "fast",
-) => analyzeWithPython(filePath, language, lyricMode, qualityMode);
+  metadata = {},
+) => analyzeWithPython(filePath, language, lyricMode, qualityMode, metadata);
 
 module.exports = {
   analyzeWithPython,

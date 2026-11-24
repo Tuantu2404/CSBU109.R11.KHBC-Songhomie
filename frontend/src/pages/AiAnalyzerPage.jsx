@@ -25,6 +25,41 @@ const formatTime = (seconds) => {
   return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
 };
 
+const parseEditedTimelineLine = (line, previousLine) => {
+  const lrcMatch = line.match(
+    /^\[(\d+):(\d+(?:\.\d+)?)\]\s*(?:\(([^)]+)\)\s*)?(.*)$/,
+  );
+  if (lrcMatch) {
+    return {
+      ...previousLine,
+      time: Number(
+        (parseInt(lrcMatch[1], 10) * 60 + parseFloat(lrcMatch[2])).toFixed(2),
+      ),
+      chord: lrcMatch[3]?.trim() || previousLine.chord,
+      text: lrcMatch[4].trim(),
+    };
+  }
+
+  const secondsMatch = line.match(
+    /^\[(\d+(?:\.\d+)?)s?\]\s*(?:\(([^)]+)\)\s*)?(.*)$/,
+  );
+  if (secondsMatch) {
+    return {
+      ...previousLine,
+      time: Number(parseFloat(secondsMatch[1]).toFixed(2)),
+      chord: secondsMatch[2]?.trim() || previousLine.chord,
+      text: secondsMatch[3].trim(),
+    };
+  }
+
+  const chordMatch = line.match(/^\[([A-G][#b]?[^\]]*)\]\s*(.*)$/);
+  return {
+    ...previousLine,
+    chord: chordMatch?.[1]?.trim() || previousLine.chord,
+    text: chordMatch ? chordMatch[2].trim() : line,
+  };
+};
+
 export default function AiAnalyzerPage() {
   const [activeTab, setActiveTab] = useState("ai"); // 'ai' | 'manual'
   const [aiSourceMode, setAiSourceMode] = useState("audio"); // 'audio' | 'youtube'
@@ -34,6 +69,8 @@ export default function AiAnalyzerPage() {
   // State chế độ AI
   const [videoUrl, setVideoUrl] = useState("");
   const [audioFile, setAudioFile] = useState(null);
+  const [audioTrackTitle, setAudioTrackTitle] = useState("");
+  const [audioTrackArtist, setAudioTrackArtist] = useState("");
   const [aiResult, setAiResult] = useState(null);
   const [editableLyrics, setEditableLyrics] = useState("");
   const [aiAudioUrl, setAiAudioUrl] = useState("");
@@ -78,7 +115,9 @@ export default function AiAnalyzerPage() {
     try {
       const formData = new FormData();
       formData.append("audio", audioFile);
-      formData.append("lyricMode", "transcribe");
+      formData.append("trackTitle", audioTrackTitle.trim());
+      formData.append("artist", audioTrackArtist.trim());
+      formData.append("lyricMode", "search");
       formData.append("qualityMode", "fast");
 
       const res = await API.post("/ai/from-audio", formData, {
@@ -92,11 +131,18 @@ export default function AiAnalyzerPage() {
       setEditableLyrics(
         data?.lyricsChords ||
           data?.lyricsAi ||
-          JSON.stringify(data?.chordsAi || [], null, 2),
+          "",
       );
       setAiAudioUrl(res.data.audioUrl || "");
-      if (!aiSongTitle) {
-        setAiSongTitle(audioFile.name.replace(/\.[^/.]+$/, ""));
+      setAiSongTitle(
+        (currentTitle) =>
+          currentTitle ||
+          data?.detectedTitle ||
+          audioTrackTitle.trim() ||
+          audioFile.name.replace(/\.[^/.]+$/, ""),
+      );
+      if (audioTrackArtist.trim()) {
+        setAiSongArtist((currentArtist) => currentArtist || audioTrackArtist.trim());
       }
     } catch (err) {
       alert(
@@ -164,12 +210,7 @@ export default function AiAnalyzerPage() {
       const updatedTimeline = Array.isArray(aiResult.timeline)
         ? aiResult.timeline.map((item, idx) => {
             if (!editedLines[idx]) return item;
-            const chordMatch = editedLines[idx].match(/^\[([^\]]+)\]\s*(.*)$/);
-            return {
-              ...item,
-              chord: chordMatch ? chordMatch[1] : item.chord,
-              text: chordMatch ? chordMatch[2] : editedLines[idx],
-            };
+            return parseEditedTimelineLine(editedLines[idx], item);
           })
         : [];
 
@@ -195,7 +236,11 @@ export default function AiAnalyzerPage() {
         navigate(`/songs/${res.data.data._id}`);
       }
     } catch (err) {
-      alert(err.response?.data?.message || "Lỗi khi lưu bản phân tích AI.");
+      alert(
+        err.response?.data?.error ||
+          err.response?.data?.message ||
+          "Lỗi khi lưu bản phân tích AI.",
+      );
     } finally {
       setAiSaving(false);
     }
@@ -347,6 +392,24 @@ export default function AiAnalyzerPage() {
           {/* Form 1A: Upload File Audio */}
           {aiSourceMode === "audio" ? (
             <form onSubmit={handleAnalyzeAudio} className="space-y-4">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <input
+                  type="text"
+                  value={audioTrackTitle}
+                  onChange={(e) => setAudioTrackTitle(e.target.value)}
+                  disabled={aiLoading}
+                  placeholder="Tên bài hát (để tìm lời đồng bộ)"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                />
+                <input
+                  type="text"
+                  value={audioTrackArtist}
+                  onChange={(e) => setAudioTrackArtist(e.target.value)}
+                  disabled={aiLoading}
+                  placeholder="Ca sĩ (không bắt buộc)"
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                />
+              </div>
               <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-2xl bg-slate-50/70 cursor-pointer transition text-center">
                 <Music className="w-10 h-10 text-indigo-500 mb-2" />
                 <span className="text-sm font-bold text-slate-700">
@@ -355,8 +418,8 @@ export default function AiAnalyzerPage() {
                     : "Bấm để chọn file âm thanh (MP3, WAV, OGG - Tối đa 25MB)"}
                 </span>
                 <span className="text-xs text-slate-400 mt-1">
-                  File sẽ được AI phân tích hợp âm theo từng giây và lưu trữ
-                  trên Cloudinary
+                  AI tìm lời đồng bộ theo tên bài trước, sau đó tự nghe file nếu
+                  chưa tìm thấy; mốc thời gian lấy từ chính file này.
                 </span>
                 <input
                   type="file"
@@ -459,6 +522,17 @@ export default function AiAnalyzerPage() {
                 )}
               </div>
 
+                {aiResult.lyricsWarning && (
+                  <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    Chưa nhận diện được lời: {aiResult.lyricsWarning}
+                  </p>
+                )}
+                {aiResult.audioWarning && (
+                  <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    {aiResult.audioWarning}
+                  </p>
+                )}
+
               {aiResultSource === "youtube" && aiResultVideoId ? (
                 <YouTubePlayer
                   ref={aiYoutubePlayerRef}
@@ -492,7 +566,9 @@ export default function AiAnalyzerPage() {
                       }`}
                     >
                       <span className="shrink-0 font-mono text-xs text-slate-400">
-                        {formatTime(line.time)}
+                        {line.isInstrumental
+                          ? `${formatTime(line.time)} - ${formatTime(line.end)}`
+                          : formatTime(line.time)}
                       </span>
                       <span className="shrink-0 rounded bg-slate-900 px-1.5 py-0.5 text-xs font-bold text-sky-300">
                         {line.chord}

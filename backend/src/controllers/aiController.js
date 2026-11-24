@@ -129,6 +129,10 @@ exports.analyzeAudio = async (req, res) => {
       language,
       lyricMode,
       qualityMode,
+      {
+        trackTitle: (req.body.trackTitle || "").trim(),
+        artist: (req.body.artist || "").trim(),
+      },
     );
 
     if (!result || result.success === false) {
@@ -138,28 +142,33 @@ exports.analyzeAudio = async (req, res) => {
       });
     }
 
-    // Đẩy file nhạc lên Cloudinary để phát lại ở trang chi tiết bài hát
+    // Lưu file gốc lên Cloudinary để phát lại và đồng bộ timeline sau khi lưu bài hát
     let audioPath = "";
+    let audioWarning = "";
     try {
-      if (storageService && typeof storageService.uploadAudio === "function") {
-        audioPath = await storageService.uploadAudio(tempFilePath);
-      } else if (req.file.filename) {
-        audioPath = `/uploads/${req.file.filename}`;
+      if (typeof storageService.uploadAudioToCloud === "function") {
+        audioPath = await storageService.uploadAudioToCloud(req.file, tempFilePath);
+      }
+      if (!audioPath) {
+        audioWarning = "Không lưu được audio gốc. Hãy kiểm tra cấu hình Cloudinary của backend.";
       }
     } catch (uploadErr) {
       console.error("Upload audio storage warning:", uploadErr.message);
+      audioWarning = "Không thể tải audio gốc lên bộ lưu trữ: " + uploadErr.message;
     }
 
     const normalizedData = buildNormalizedAiPayload(result, {
       lyricMode,
       qualityMode,
       audioPath,
+      audioWarning,
     });
 
     return res.json({
       success: true,
       aiData: normalizedData,
       audioUrl: audioPath,
+      audioWarning,
       data: normalizedData,
     });
   } catch (error) {
@@ -171,7 +180,7 @@ exports.analyzeAudio = async (req, res) => {
   } finally {
     if (
       createdFromBuffer ||
-      (storageService && typeof storageService.uploadAudio === "function")
+      (storageService && typeof storageService.uploadAudioToCloud === "function")
     ) {
       removeLocalFile(tempFilePath);
     }

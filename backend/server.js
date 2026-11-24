@@ -17,8 +17,8 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // Phục vụ file tĩnh (tương thích ngược với các bản nhạc mẫu cũ)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));

@@ -141,6 +141,7 @@ exports.createSong = async (req, res) => {
       data: song
     });
   } catch (error) {
+    console.error('[Create Song Error]:', error.message);
     res.status(500).json({ success: false, message: 'Lỗi máy chủ', error: error.message });
   }
 };

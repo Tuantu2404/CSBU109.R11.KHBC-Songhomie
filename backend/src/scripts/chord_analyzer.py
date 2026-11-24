@@ -225,27 +225,6 @@ def _parse_lrc_lyrics(synced_lrc):
     return segments
 
 
-def _detect_first_vocal_time(y_vocal, sr, librosa):
-    """Dò giây đầu tiên có giọng hát để bù độ trễ đoạn nhạc dạo đầu (intro)."""
-    try:
-        from faster_whisper.vad import get_speech_timestamps, VadOptions
-
-        y_16k = (
-            librosa.resample(y_vocal, orig_sr=sr, target_sr=16000).astype(np.float32)
-            if sr != 16000
-            else y_vocal.astype(np.float32)
-        )
-        speech_chunks = get_speech_timestamps(
-            y_16k,
-            VadOptions(min_silence_duration_ms=700, speech_pad_ms=150),
-        )
-        if speech_chunks:
-            return round(float(speech_chunks[0]["start"]) / 16000.0, 2)
-    except Exception:
-        pass
-    return None
-
-
 def _fetch_synced_lyrics_from_lrclib(yt_meta, fallback_title=""):
     """Chế độ 1: Tra cứu lời bài hát chuẩn từ LRCLIB qua nhiều ứng viên từ khóa."""
     candidates = _build_search_candidates(yt_meta, fallback_title)
@@ -654,10 +633,9 @@ def _transcribe_with_whisper_fast(
             initial_prompt=initial_prompt,
             beam_size=3,
             word_timestamps=True,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=700, speech_pad_ms=250),
-            no_speech_threshold=0.6,
-            log_prob_threshold=-1.0,
+            vad_filter=False,
+            no_speech_threshold=0.85,
+            log_prob_threshold=-1.2,
             compression_ratio_threshold=2.4,
             condition_on_previous_text=False,
         )
@@ -668,7 +646,7 @@ def _transcribe_with_whisper_fast(
         for s in segments:
             text = (s.text or "").strip()
             no_speech_prob = getattr(s, "no_speech_prob", 0.0)
-            if not text or no_speech_prob > 0.65 or _is_hallucinated_subtitle(text):
+            if not text or no_speech_prob > 0.95 or _is_hallucinated_subtitle(text):
                 continue
 
             words = getattr(s, "words", None) or []
@@ -682,84 +660,72 @@ def _transcribe_with_whisper_fast(
         return [], lang_code, str(e)
 
 
-def _format_synced_lyrics(lyrics_segments, chords_output):
-    if not lyrics_segments:
-        return "\n".join(
-            f"[{c['time']}s] ({c['chord']}) [Beat Marker]" for c in chords_output
-        )
-
-    lines = []
-    chord_idx = 0
-    current_chord = chords_output[0]["chord"] if chords_output else "C"
-
-    for seg in lyrics_segments:
-        start_time = seg["start"]
-        while chord_idx + 1 < len(chords_output) and chords_output[chord_idx + 1]["time"] <= start_time:
-            chord_idx += 1
-            current_chord = chords_output[chord_idx]["chord"]
-
-        mins = int(start_time // 60)
-        secs = start_time % 60
-        lines.append(f"[{mins:02d}:{secs:05.2f}] ({current_chord}) {seg['text']}")
-
-    return "\n".join(lines)
-
-
 def _build_timed_lyrics(lyrics_segments, chords_output, duration):
-    """Tạo danh sách lời có mốc start/end và hợp âm tương ứng để làm thanh chiếu chỉ khi phát nhạc."""
-    if not lyrics_segments:
-        return []
-
-    timed = []
+    """Giữ một khoảng nhạc dạo, sau đó chỉ tạo dòng cho từng câu lời."""
+    lyric_rows = []
     chord_idx = 0
     current_chord = chords_output[0]["chord"] if chords_output else "C"
-
-    for i, seg in enumerate(lyrics_segments):
-        start_t = float(seg["start"])
+    for seg in lyrics_segments:
+        start_t = max(0.0, float(seg["start"]))
         while chord_idx + 1 < len(chords_output) and chords_output[chord_idx + 1]["time"] <= start_t:
             chord_idx += 1
             current_chord = chords_output[chord_idx]["chord"]
 
-        if i + 1 < len(lyrics_segments):
-            end_t = max(start_t + 0.5, float(lyrics_segments[i + 1]["start"]))
-        else:
-            end_t = max(start_t + 2.0, float(duration or start_t + 3.0))
-
-        mins = int(start_t // 60)
-        secs = start_t % 60
-        timed.append({
-            "index": i,
+        lyric_rows.append({
             "start": round(start_t, 2),
-            "end": round(end_t, 2),
-            "timeLabel": f"{mins:02d}:{secs:05.2f}",
             "chord": current_chord,
             "text": seg["text"],
+            "isInstrumental": False,
         })
 
-    return timed
+    lyric_rows.sort(key=lambda event: event["start"])
+    if not lyric_rows:
+        rows = [{
+            "start": 0.0,
+            "end": round(float(duration), 2),
+            "chord": "",
+            "text": "Đoạn nhạc không lời",
+            "isInstrumental": True,
+        }]
+    else:
+        rows = []
+        if lyric_rows[0]["start"] > 0:
+            rows.append({
+                "start": 0.0,
+                "end": lyric_rows[0]["start"],
+                "chord": "",
+                "text": "Đoạn nhạc không lời",
+                "isInstrumental": True,
+            })
+
+        for index, row in enumerate(lyric_rows):
+            next_time = (
+                lyric_rows[index + 1]["start"]
+                if index + 1 < len(lyric_rows)
+                else duration
+            )
+            row["end"] = round(max(row["start"], float(next_time or row["start"])), 2)
+            rows.append(row)
+
+    for index, row in enumerate(rows):
+        mins = int(row["start"] // 60)
+        secs = row["start"] % 60
+        row["timeLabel"] = f"{mins:02d}:{secs:05.2f}"
+        row["index"] = index
+
+    return rows
 
 
-def _mock_fallback():
-    sample_timed = [
-        {"index": 0, "start": 0.0, "end": 4.0, "timeLabel": "00:00.00", "chord": "C", "text": "Nắng vàng góc phố quen"},
-        {"index": 1, "start": 4.0, "end": 8.0, "timeLabel": "00:04.00", "chord": "G", "text": "Tiếng đàn cất lên êm đềm"},
-        {"index": 2, "start": 8.0, "end": 12.0, "timeLabel": "00:08.00", "chord": "Am", "text": "Songhomie ghi lại giai điệu"},
-        {"index": 3, "start": 12.0, "end": 16.0, "timeLabel": "00:12.00", "chord": "F", "text": "Trao nhau từng nốt nhạc yêu thương"},
-    ]
-    return {
-        "success": True,
-        "isMock": True,
-        "tempo": 120,
-        "key": "C",
-        "chords": [
-            {"time": 0.0, "chord": "C"},
-            {"time": 4.0, "chord": "G"},
-            {"time": 8.0, "chord": "Am"},
-            {"time": 12.0, "chord": "F"},
-        ],
-        "lyrics": "\n".join(f"[{item['timeLabel']}] ({item['chord']}) {item['text']}" for item in sample_timed),
-        "timedLyrics": sample_timed,
-    }
+def _format_synced_lyrics(timed_lyrics):
+    lines = []
+    for line in timed_lyrics:
+        if line["isInstrumental"]:
+            lines.append(f"[{line['timeLabel']}] {line['text']}")
+        else:
+            lines.append(
+                f"[{line['timeLabel']}] ({line['chord']}) {line['text']}".rstrip()
+            )
+    return "\n".join(lines)
 
 
 def analyze_audio(
@@ -767,6 +733,8 @@ def analyze_audio(
     lang_code="auto",
     lyric_mode="search",
     quality_mode="fast",
+    track_title="",
+    artist_name="",
 ):
     temp_files = []
     stem_dir = None
@@ -789,7 +757,15 @@ def analyze_audio(
                     "error": f"Không tải được audio từ YouTube: {str(yt_err)}",
                 }
         else:
-            fallback_title = os.path.splitext(os.path.basename(file_path))[0]
+            fallback_title = (
+                _strip_noise_words(track_title)
+                or os.path.splitext(os.path.basename(file_path))[0]
+            )
+            yt_meta = {
+                "title": fallback_title,
+                "track": fallback_title,
+                "artist": _strip_noise_words(artist_name),
+            }
 
         if not os.path.exists(file_path):
             return {"success": False, "error": f"File không tồn tại: {file_path}"}
@@ -857,14 +833,7 @@ def analyze_audio(
             if lrclib_title:
                 matched_title = lrclib_title
 
-            if lyrics_segments:
-                first_vocal = _detect_first_vocal_time(y_vocal, sr, librosa)
-                if first_vocal is not None:
-                    intro_offset = round(first_vocal - lyrics_segments[0]["start"], 2)
-                    if intro_offset > 3.5:
-                        for seg in lyrics_segments:
-                            seg["start"] = round(seg["start"] + intro_offset, 2)
-            else:
+            if not lyrics_segments:
                 lyrics_source = "whisper"
                 matched_title = _strip_noise_words(fallback_title) or fallback_title
                 lyrics_segments, detected_lang, whisper_err = _transcribe_with_whisper_fast(
@@ -878,7 +847,13 @@ def analyze_audio(
 
         audio_duration = float(librosa.get_duration(y=y_mixed, sr=sr))
         timed_lyrics = _build_timed_lyrics(lyrics_segments, chords_output, audio_duration)
-        full_lyrics_text = _format_synced_lyrics(lyrics_segments, chords_output)
+        full_lyrics_text = _format_synced_lyrics(timed_lyrics)
+        lyrics_warning = ""
+        if not lyrics_segments:
+            lyrics_warning = whisper_err or (
+                "Không nhận diện được lời bài hát. Hãy kiểm tra file có giọng hát rõ "
+                "và cấu hình GROQ_API_KEY hoặc cài Faster-Whisper trên máy chủ."
+            )
 
         return {
             "success": True,
@@ -894,10 +869,11 @@ def analyze_audio(
             "detectedLanguage": detected_lang,
             "detectedTitle": matched_title,
             "whisperWarning": whisper_err,
+            "lyricsWarning": lyrics_warning,
         }
 
-    except ImportError:
-        return _mock_fallback()
+    except ImportError as e:
+        return {"success": False, "error": f"Thiếu thư viện AI cần thiết: {e}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
     finally:
@@ -917,6 +893,8 @@ if __name__ == "__main__":
         requested_lang = sys.argv[2] if len(sys.argv) > 2 else "auto"
         requested_mode = sys.argv[3] if len(sys.argv) > 3 else "search"
         requested_quality = sys.argv[4] if len(sys.argv) > 4 else "fast"
+        requested_title = sys.argv[5] if len(sys.argv) > 5 else ""
+        requested_artist = sys.argv[6] if len(sys.argv) > 6 else ""
         real_stdout = sys.stdout
         sys.stdout = sys.stderr
         try:
@@ -925,6 +903,8 @@ if __name__ == "__main__":
                 requested_lang,
                 requested_mode,
                 requested_quality,
+                requested_title,
+                requested_artist,
             )
         finally:
             sys.stdout = real_stdout
