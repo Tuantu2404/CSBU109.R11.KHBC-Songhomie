@@ -28,9 +28,9 @@
    - Hỗ trợ 2 chế độ lấy lời (**Tìm lời chuẩn LRCLIB** & **AI tự nghe giọng hát**) và 2 mức xử lý (**Fast ~5s** & **Studio tách Vocal/Instrumental**).
    - Tích hợp **Job Queue & Request Collapsing** giúp giới hạn tiến trình AI đồng thời, chống quá tải CPU/RAM khi nhiều người dùng truy cập cùng lúc.
 2. **✍️ Manual Chord Sheet Editor:** Bộ chuyển đổi chế độ linh hoạt cho phép tự biên soạn bài hát, chèn và căn chỉnh hợp âm dạng `[C]`, `[Am]`, `[Dm]` thủ công.
-3. **🎸 Interactive Fretboard, Key Transposer & Auto Scroll:** Hiển thị thế bấm hợp âm trực quan theo thời gian thực khi phát nhạc, đổi tông tức thì (`-1` / `+1`) và cuộn trang tự động khi biểu diễn.
+3. **🎸 Interactive Fretboard, Key Transposer & Synced Playback:** Phát video YouTube hoặc audio đã tải lên, đồng bộ timeline lời/hợp âm để chọn dòng là nhảy đến đúng thời điểm; hỗ trợ đổi tông tức thì (`-1` / `+1`).
 4. **🏆 Rankings & Music Competitions:** Bảng xếp hạng bài hát/hợp âm nổi bật và các thử thách cover nhạc cụ dành cho cộng đồng.
-5. **🔐 Authentication & Community Discussion:** Hệ thống đăng ký, đăng nhập bảo mật bằng JWT, quản lý danh sách phát cá nhân và khu vực bình luận tương tác.
+5. **🔐 Authentication & Community Discussion:** Token JWT đăng nhập hết hạn sau 30 phút; chủ sở hữu mới có quyền xóa bài hát của mình. Kèm khu vực bình luận tương tác.
 
 ---
 

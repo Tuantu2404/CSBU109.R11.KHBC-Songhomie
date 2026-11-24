@@ -3,9 +3,16 @@ const jwt = require('jsonwebtoken');
 
 // Hàm tạo JWT Token
 const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || 'songhomie_secret', {
-    expiresIn: '30d',
-  });
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const lifetimeSeconds = 30 * 60;
+  return {
+    token: jwt.sign(
+      { id, iat: issuedAt },
+      process.env.JWT_SECRET || 'songhomie_secret',
+      { expiresIn: lifetimeSeconds },
+    ),
+    tokenExpiresAt: new Date((issuedAt + lifetimeSeconds) * 1000).toISOString(),
+  };
 };
 
 // @desc    Đăng ký tài khoản mới
@@ -24,6 +31,7 @@ exports.register = async (req, res) => {
     }
 
     const user = await User.create({ username, email, password });
+    const authToken = generateToken(user._id);
 
     res.status(201).json({
       success: true,
@@ -33,7 +41,8 @@ exports.register = async (req, res) => {
         username: user.username,
         email: user.email,
         role: user.role,
-        token: generateToken(user._id),
+        token: authToken.token,
+        tokenExpiresAt: authToken.tokenExpiresAt,
       },
     });
   } catch (error) {
@@ -49,6 +58,7 @@ exports.login = async (req, res) => {
 
     const user = await User.findOne({ email }).select('+password');
     if (user && (await user.matchPassword(password))) {
+      const authToken = generateToken(user._id);
       res.json({
         success: true,
         message: 'Đăng nhập thành công',
@@ -57,7 +67,8 @@ exports.login = async (req, res) => {
           username: user.username,
           email: user.email,
           role: user.role,
-          token: generateToken(user._id),
+          token: authToken.token,
+          tokenExpiresAt: authToken.tokenExpiresAt,
         },
       });
     } else {

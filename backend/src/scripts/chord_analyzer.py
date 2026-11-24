@@ -427,16 +427,20 @@ def _download_youtube_audio(url):
     out_tpl = os.path.join(temp_dir, f"songhomie_yt_{file_id}.%(ext)s")
 
     ydl_opts = {
-        "format": "bestaudio/best",
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
         "outtmpl": out_tpl,
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
         "js_runtimes": {"node": {}},
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "ios", "web"],
+            }
+        },
     }
 
-    # Hỗ trợ cookies.txt khi deploy lên VPS/Cloud để vượt qua kiểm tra bot của YouTube
     cookies_path = os.environ.get("YT_COOKIES_PATH", "").strip()
     if cookies_path and os.path.exists(cookies_path):
         ydl_opts["cookiefile"] = cookies_path
@@ -623,14 +627,12 @@ def _transcribe_with_whisper_fast(
     """Chế độ 2: AI nghe giọng hát tiếng Việt & tiếng Anh (Groq Cloud -> Local Whisper fallback)."""
     whisper_lang = lang_code if lang_code in SUPPORTED_LANGUAGES else None
 
-    # 1. Ưu tiên Groq Cloud (2 giây, không tốn RAM server)
     cloud_res = _transcribe_via_groq_cloud(y_vocal, sr, librosa, whisper_lang, initial_prompt)
     if cloud_res is not None:
         results, detected_lang = cloud_res
         results = _polish_lyrics_with_llm(results, song_title, detected_lang)
         return results, detected_lang, None
 
-    # 2. Dự phòng chạy nội bộ bằng Faster-Whisper
     try:
         from faster_whisper import WhisperModel
 
@@ -703,7 +705,47 @@ def _format_synced_lyrics(lyrics_segments, chords_output):
     return "\n".join(lines)
 
 
+def _build_timed_lyrics(lyrics_segments, chords_output, duration):
+    """Tạo danh sách lời có mốc start/end và hợp âm tương ứng để làm thanh chiếu chỉ khi phát nhạc."""
+    if not lyrics_segments:
+        return []
+
+    timed = []
+    chord_idx = 0
+    current_chord = chords_output[0]["chord"] if chords_output else "C"
+
+    for i, seg in enumerate(lyrics_segments):
+        start_t = float(seg["start"])
+        while chord_idx + 1 < len(chords_output) and chords_output[chord_idx + 1]["time"] <= start_t:
+            chord_idx += 1
+            current_chord = chords_output[chord_idx]["chord"]
+
+        if i + 1 < len(lyrics_segments):
+            end_t = max(start_t + 0.5, float(lyrics_segments[i + 1]["start"]))
+        else:
+            end_t = max(start_t + 2.0, float(duration or start_t + 3.0))
+
+        mins = int(start_t // 60)
+        secs = start_t % 60
+        timed.append({
+            "index": i,
+            "start": round(start_t, 2),
+            "end": round(end_t, 2),
+            "timeLabel": f"{mins:02d}:{secs:05.2f}",
+            "chord": current_chord,
+            "text": seg["text"],
+        })
+
+    return timed
+
+
 def _mock_fallback():
+    sample_timed = [
+        {"index": 0, "start": 0.0, "end": 4.0, "timeLabel": "00:00.00", "chord": "C", "text": "Nắng vàng góc phố quen"},
+        {"index": 1, "start": 4.0, "end": 8.0, "timeLabel": "00:04.00", "chord": "G", "text": "Tiếng đàn cất lên êm đềm"},
+        {"index": 2, "start": 8.0, "end": 12.0, "timeLabel": "00:08.00", "chord": "Am", "text": "Songhomie ghi lại giai điệu"},
+        {"index": 3, "start": 12.0, "end": 16.0, "timeLabel": "00:12.00", "chord": "F", "text": "Trao nhau từng nốt nhạc yêu thương"},
+    ]
     return {
         "success": True,
         "isMock": True,
@@ -715,12 +757,8 @@ def _mock_fallback():
             {"time": 8.0, "chord": "Am"},
             {"time": 12.0, "chord": "F"},
         ],
-        "lyrics": (
-            "[00:00.00] (C) Nắng vàng góc phố quen\n"
-            "[00:04.00] (G) Tiếng đàn cất lên êm đềm\n"
-            "[00:08.00] (Am) Songhomie ghi lại giai điệu\n"
-            "[00:12.00] (F) Trao nhau từng nốt nhạc yêu thương"
-        ),
+        "lyrics": "\n".join(f"[{item['timeLabel']}] ({item['chord']}) {item['text']}" for item in sample_timed),
+        "timedLyrics": sample_timed,
     }
 
 
@@ -778,7 +816,6 @@ def analyze_audio(
         y_inst = y_mixed
         stem_separated = False
 
-        # Chỉ tách vocal khi ở chế độ 'transcribe' (AI tự nghe) + chất lượng 'studio'
         disable_stem = os.environ.get("DISABLE_STEM_SEPARATION", "").lower() == "true"
         should_separate = (
             normalized_mode == "transcribe"
@@ -796,7 +833,6 @@ def analyze_audio(
                     y_vocal = y_mixed
                     y_inst = y_mixed
 
-        # Nhận diện hợp âm trên track instrumental
         chords_output, calc_tempo, detected_key = _extract_chords_and_tempo(y_inst, sr, librosa)
 
         whisper_err = None
@@ -806,7 +842,6 @@ def analyze_audio(
         initial_prompt = _build_whisper_initial_prompt(yt_meta, fallback_title)
 
         if normalized_mode == "transcribe":
-            # CHẾ ĐỘ 2: AI nghe trực tiếp giọng hát
             lyrics_source = "whisper"
             lyrics_segments, detected_lang, whisper_err = _transcribe_with_whisper_fast(
                 y_vocal,
@@ -817,7 +852,6 @@ def analyze_audio(
                 initial_prompt=initial_prompt,
             )
         else:
-            # CHẾ ĐỘ 1: Tìm lời chuẩn theo tiêu đề trên LRCLIB + bù trễ intro
             lyrics_source = "lrclib"
             lyrics_segments, lrclib_title = _fetch_synced_lyrics_from_lrclib(yt_meta, fallback_title)
             if lrclib_title:
@@ -842,11 +876,14 @@ def analyze_audio(
                     initial_prompt=initial_prompt,
                 )
 
+        audio_duration = float(librosa.get_duration(y=y_mixed, sr=sr))
+        timed_lyrics = _build_timed_lyrics(lyrics_segments, chords_output, audio_duration)
         full_lyrics_text = _format_synced_lyrics(lyrics_segments, chords_output)
 
         return {
             "success": True,
             "lyrics": full_lyrics_text,
+            "timedLyrics": timed_lyrics,
             "chords": chords_output,
             "tempo": calc_tempo,
             "key": detected_key,
@@ -900,3 +937,4 @@ if __name__ == "__main__":
             ),
             flush=True,
         )
+        

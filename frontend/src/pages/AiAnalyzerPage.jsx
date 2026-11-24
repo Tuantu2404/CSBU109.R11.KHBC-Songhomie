@@ -1,4 +1,4 @@
-import { useState, useContext } from "react";
+import { useState, useContext, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   Upload,
@@ -11,12 +11,18 @@ import {
 } from "lucide-react";
 import API from "../services/api";
 import { AuthContext } from "../context/AuthContext";
+import YouTubePlayer from "../components/YouTubePlayer";
 
 const extractYoutubeId = (url = "") => {
   const match = url.match(
     /(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?/\s]{11})/,
   );
   return match ? match[1] : "";
+};
+
+const formatTime = (seconds) => {
+  const safe = Math.max(0, Math.floor(Number(seconds) || 0));
+  return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
 };
 
 export default function AiAnalyzerPage() {
@@ -32,6 +38,11 @@ export default function AiAnalyzerPage() {
   const [editableLyrics, setEditableLyrics] = useState("");
   const [aiAudioUrl, setAiAudioUrl] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiResultSource, setAiResultSource] = useState("");
+  const [aiResultVideoId, setAiResultVideoId] = useState("");
+  const [aiCurrentTime, setAiCurrentTime] = useState(0);
+  const aiAudioRef = useRef(null);
+  const aiYoutubePlayerRef = useRef(null);
 
   // Thông tin để lưu kết quả AI thành bài hát
   const [aiSongTitle, setAiSongTitle] = useState("");
@@ -67,6 +78,8 @@ export default function AiAnalyzerPage() {
     try {
       const formData = new FormData();
       formData.append("audio", audioFile);
+      formData.append("lyricMode", "transcribe");
+      formData.append("qualityMode", "fast");
 
       const res = await API.post("/ai/from-audio", formData, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -74,6 +87,8 @@ export default function AiAnalyzerPage() {
 
       const data = res.data.aiData;
       setAiResult(data);
+      setAiResultSource("audio");
+      setAiCurrentTime(0);
       setEditableLyrics(
         data?.lyricsChords ||
           data?.lyricsAi ||
@@ -108,6 +123,9 @@ export default function AiAnalyzerPage() {
       const res = await API.post("/ai/from-youtube", { videoUrl });
       const data = res.data.data;
       setAiResult(data);
+      setAiResultSource("youtube");
+      setAiResultVideoId(extractYoutubeId(videoUrl));
+      setAiCurrentTime(0);
       setEditableLyrics(
         data?.lyricsChords ||
           data?.lyricsAi ||
@@ -162,7 +180,7 @@ export default function AiAnalyzerPage() {
         key: aiResult.chordsAi?.[0]?.chord || "C",
         audioPath: aiAudioUrl || "",
         youtubeId:
-          aiSourceMode === "youtube" ? extractYoutubeId(videoUrl) : undefined,
+          aiResultSource === "youtube" ? aiResultVideoId : undefined,
         chordsAi: aiResult.chordsAi || [],
         timeline: updatedTimeline,
         lyricsChords: editableLyrics || aiResult.lyricsChords || aiResult.lyricsAi || "",
@@ -218,6 +236,26 @@ export default function AiAnalyzerPage() {
       setSaveLoading(false);
     }
   };
+
+  const handleSeekToAiLine = (line) => {
+    const time = Number(line.time) || 0;
+    setAiCurrentTime(time);
+    if (aiResultSource === "youtube") {
+      aiYoutubePlayerRef.current?.seekTo(time);
+      aiYoutubePlayerRef.current?.play();
+    } else if (aiAudioRef.current) {
+      aiAudioRef.current.currentTime = time;
+      aiAudioRef.current.play().catch(() => {});
+    }
+  };
+
+  const activeAiTimelineIndex = Array.isArray(aiResult?.timeline)
+    ? aiResult.timeline.reduce(
+        (activeIndex, line, index) =>
+          aiCurrentTime >= Number(line.time) ? index : activeIndex,
+        0,
+      )
+    : -1;
 
   return (
     <div className="max-w-4xl mx-auto p-6 md:p-10 space-y-8">
@@ -421,8 +459,48 @@ export default function AiAnalyzerPage() {
                 )}
               </div>
 
-              {aiAudioUrl && (
-                <audio controls src={aiAudioUrl} className="w-full h-10" />
+              {aiResultSource === "youtube" && aiResultVideoId ? (
+                <YouTubePlayer
+                  ref={aiYoutubePlayerRef}
+                  videoId={aiResultVideoId}
+                  onTimeUpdate={setAiCurrentTime}
+                />
+              ) : aiAudioUrl ? (
+                <audio
+                  ref={aiAudioRef}
+                  controls
+                  src={aiAudioUrl}
+                  onTimeUpdate={(event) => setAiCurrentTime(event.target.currentTime)}
+                  className="w-full h-10"
+                />
+              ) : null}
+
+              {Array.isArray(aiResult.timeline) && aiResult.timeline.length > 0 && (
+                <div className="max-h-64 space-y-2 overflow-y-auto rounded-2xl bg-slate-50 p-3">
+                  <p className="text-xs font-bold text-slate-600">
+                    Bấm một dòng để phát đúng mốc lời và hợp âm:
+                  </p>
+                  {aiResult.timeline.map((line, index) => (
+                    <button
+                      key={`${line.time}-${index}`}
+                      type="button"
+                      onClick={() => handleSeekToAiLine(line)}
+                      className={`flex w-full items-start gap-2 rounded-xl border p-2.5 text-left text-sm transition ${
+                        index === activeAiTimelineIndex
+                          ? "border-sky-300 bg-sky-100 text-slate-900"
+                          : "border-transparent bg-white text-slate-600 hover:border-slate-200"
+                      }`}
+                    >
+                      <span className="shrink-0 font-mono text-xs text-slate-400">
+                        {formatTime(line.time)}
+                      </span>
+                      <span className="shrink-0 rounded bg-slate-900 px-1.5 py-0.5 text-xs font-bold text-sky-300">
+                        {line.chord}
+                      </span>
+                      <span>{line.text}</span>
+                    </button>
+                  ))}
+                </div>
               )}
 
               <textarea

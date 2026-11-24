@@ -1,5 +1,5 @@
 import { useState, useEffect, useContext, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Maximize2,
   Minimize2,
@@ -8,10 +8,12 @@ import {
   Volume2,
   VolumeX,
   RotateCcw,
+  Trash2,
 } from 'lucide-react';
 import API from '../services/api';
 import { AuthContext } from '../context/AuthContext';
 import GuitarFretboard, { playGuitarChordSound } from '../components/GuitarFretboard';
+import YouTubePlayer from '../components/YouTubePlayer';
 
 const NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const FLAT_TO_SHARP = {
@@ -81,10 +83,10 @@ function normalizeSongTimeline(timeline = []) {
 export default function SongDetailPage() {
   const { id } = useParams();
   const { user } = useContext(AuthContext);
+  const navigate = useNavigate();
 
   const audioRef = useRef(null);
-  const lyricsBoxRef = useRef(null);
-  const activeLineRef = useRef(null);
+  const youtubePlayerRef = useRef(null);
   const lastPlayedIndexRef = useRef(-1);
   const fetchedSongIdRef = useRef(null);
 
@@ -96,7 +98,7 @@ export default function SongDetailPage() {
 
   // State điều khiển tính năng tương tác
   const [keyTranspose, setKeyTranspose] = useState(0);
-  const [isScrolling, setIsScrolling] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [selectedChord, setSelectedChord] = useState('C');
@@ -139,40 +141,23 @@ export default function SongDetailPage() {
     ? Number(song.timeline[song.timeline.length - 1]?.time || 0) + 3
     : 0;
 
-  // 1. Bộ đếm thời gian & tự động cuộn khi bấm nút "Tự động cuộn"
+  // Chỉ mô phỏng thời gian cho chord sheet không có audio/video.
   useEffect(() => {
-    if (!isScrolling) return;
-
-    if (song?.audioPath && audioRef.current) {
-      if (audioRef.current.paused) {
-        audioRef.current.play().catch(() => {});
-      }
-      return;
-    }
+    if (!isPlaying || song?.audioPath || song?.youtubeId) return;
 
     const interval = setInterval(() => {
-      if (hasTimeline) {
-        setCurrentTime((prev) => {
-          const next = Number((prev + 0.1).toFixed(1));
-          if (next >= maxTimelineTime) {
-            setIsScrolling(false);
-            lastPlayedIndexRef.current = -1;
-            return 0;
-          }
-          return next;
-        });
-      } else if (lyricsBoxRef.current) {
-        const box = lyricsBoxRef.current;
-        if (box.scrollTop + box.clientHeight >= box.scrollHeight - 2) {
-          setIsScrolling(false);
-        } else {
-          box.scrollTop += 1;
-        }
+      const next = Number((currentTime + 0.1).toFixed(1));
+      if (next >= maxTimelineTime) {
+        setCurrentTime(0);
+        setIsPlaying(false);
+        lastPlayedIndexRef.current = -1;
+      } else {
+        setCurrentTime(next);
       }
     }, 100);
 
     return () => clearInterval(interval);
-  }, [isScrolling, song?.audioPath, hasTimeline, maxTimelineTime]);
+  }, [currentTime, isPlaying, song?.audioPath, song?.youtubeId, hasTimeline, maxTimelineTime]);
 
   // 2. Xác định dòng hợp âm đang kích hoạt theo currentTime
   const activeTimelineIndex = hasTimeline
@@ -185,17 +170,11 @@ export default function SongDetailPage() {
       const currentChord = song.timeline[activeTimelineIndex]?.chord;
       if (currentChord) setSelectedChord(currentChord);
 
-      if (isScrolling) {
-        if (activeLineRef.current && lyricsBoxRef.current) {
-          activeLineRef.current.scrollIntoView({
-            behavior: 'smooth',
-            block: 'center',
-          });
-        }
-
+      if (isPlaying) {
         // Gảy tiếng đàn Guitar mỗi khi bước sang dòng hợp âm mới (nếu bài không có MP3 gốc)
         if (
           !song?.audioPath &&
+          !song?.youtubeId &&
           synthEnabled &&
           lastPlayedIndexRef.current !== activeTimelineIndex
         ) {
@@ -210,45 +189,47 @@ export default function SongDetailPage() {
       );
       if (activeAi) setSelectedChord(activeAi);
     }
-  }, [activeTimelineIndex, hasTimeline, currentTime, song, isScrolling, synthEnabled]);
+  }, [activeTimelineIndex, hasTimeline, currentTime, song, isPlaying, synthEnabled]);
 
-  const handleToggleAutoScroll = () => {
-    setIsScrolling((prev) => {
-      const nextState = !prev;
-      if (nextState) {
-        // Khởi động AudioContext ngay trong thao tác click của user để trình duyệt cho phép phát tiếng
-        if (!song?.audioPath && synthEnabled && hasTimeline) {
-          const idx = activeTimelineIndex >= 0 ? activeTimelineIndex : 0;
-          const chordToPlay = transposeChord(
-            song.timeline[idx]?.chord || selectedChord,
-            keyTranspose,
-          );
-          lastPlayedIndexRef.current = idx;
-          playGuitarChordSound(chordToPlay);
-        }
-        if (song?.audioPath && audioRef.current) {
-          audioRef.current.play().catch(() => {});
-        }
+  const handleTogglePlayback = () => {
+    if (song?.youtubeId && youtubePlayerRef.current) {
+      if (youtubePlayerRef.current.getState() === 1) {
+        youtubePlayerRef.current.pause();
       } else {
-        lastPlayedIndexRef.current = -1;
-        if (song?.audioPath && audioRef.current) {
-          audioRef.current.pause();
-        }
+        youtubePlayerRef.current.play();
       }
-      return nextState;
-    });
+      return;
+    }
+
+    if (song?.audioPath && audioRef.current) {
+      if (audioRef.current.paused) audioRef.current.play().catch(() => {});
+      else audioRef.current.pause();
+      return;
+    }
+
+    if (!isPlaying && synthEnabled && hasTimeline) {
+      const idx = activeTimelineIndex >= 0 ? activeTimelineIndex : 0;
+      const chordToPlay = transposeChord(
+        song.timeline[idx]?.chord || selectedChord,
+        keyTranspose,
+      );
+      lastPlayedIndexRef.current = idx;
+      playGuitarChordSound(chordToPlay);
+    } else {
+      lastPlayedIndexRef.current = -1;
+    }
+    setIsPlaying((previous) => !previous);
   };
 
   const handleResetTimeline = () => {
-    setIsScrolling(false);
+    setIsPlaying(false);
     setCurrentTime(0);
     lastPlayedIndexRef.current = -1;
+    youtubePlayerRef.current?.pause();
+    youtubePlayerRef.current?.seekTo(0);
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
-    }
-    if (lyricsBoxRef.current) {
-      lyricsBoxRef.current.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
@@ -256,17 +237,32 @@ export default function SongDetailPage() {
     const targetTime = Number(time) || 0;
     if (chord) {
       setSelectedChord(chord);
-      if (!song?.audioPath && synthEnabled) {
+      if (!song?.audioPath && !song?.youtubeId && synthEnabled) {
         playGuitarChordSound(transposeChord(chord, keyTranspose));
       }
     }
     lastPlayedIndexRef.current = index;
     setCurrentTime(targetTime);
 
-    if (audioRef.current) {
+    if (song?.youtubeId && youtubePlayerRef.current) {
+      youtubePlayerRef.current.seekTo(targetTime);
+      youtubePlayerRef.current.play();
+      setIsPlaying(true);
+    } else if (audioRef.current) {
       audioRef.current.currentTime = targetTime;
       audioRef.current.play().catch(() => {});
-      setIsScrolling(true);
+      setIsPlaying(true);
+    }
+  };
+
+  const handleDeleteSong = async () => {
+    if (!window.confirm('Bạn có chắc muốn xóa bài hát này không?')) return;
+    try {
+      await API.delete(`/songs/${id}`);
+      window.alert('Đã xóa bài hát.');
+      navigate('/');
+    } catch (error) {
+      window.alert(error.response?.data?.message || 'Không thể xóa bài hát.');
     }
   };
 
@@ -395,16 +391,29 @@ export default function SongDetailPage() {
   const rawTransposed = transposeChord(selectedChord, keyTranspose);
   const safeChordMatch = String(rawTransposed || '').match(/^([A-G][#b]?m?)/);
   const displayChordOnGuitar = safeChordMatch ? safeChordMatch[1] : 'C';
+  const songOwnerId = song.user?._id || song.user;
+  const currentUserId = user?._id || user?.id;
+  const isSongOwner = Boolean(currentUserId && String(songOwnerId) === String(currentUserId));
 
   return (
     <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-8">
-      <div>
+      <div className="flex items-center justify-between gap-3">
         <Link
           to="/"
           className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-indigo-600 transition"
         >
           <ArrowLeft className="w-4 h-4" /> Quay lại danh sách bài hát
         </Link>
+        {isSongOwner && (
+          <button
+            type="button"
+            onClick={handleDeleteSong}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100"
+            title="Xóa bài hát của bạn"
+          >
+            <Trash2 className="h-4 w-4" /> Xóa bài hát
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
@@ -441,22 +450,36 @@ export default function SongDetailPage() {
                 </div>
               </div>
 
-              <div>
-                <h1 className="text-2xl md:text-3xl font-black text-slate-900 leading-tight">
-                  {song.title}
-                </h1>
-                <p className="text-slate-500 text-sm font-medium mt-1">
-                  Artist:{' '}
-                  <span className="text-slate-800 font-bold">
-                    {song.artist || 'Various Artists'}
-                  </span>{' '}
-                  - Genre: {song.genre || 'Acoustic'}
-                </p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h1 className="text-2xl md:text-3xl font-black text-slate-900 leading-tight">
+                    {song.title}
+                  </h1>
+                  <p className="text-slate-500 text-sm font-medium mt-1">
+                    Artist:{' '}
+                    <span className="text-slate-800 font-bold">
+                      {song.artist || 'Various Artists'}
+                    </span>{' '}
+                    - Genre: {song.genre || 'Acoustic'}
+                  </p>
+                </div>
               </div>
 
-              {/* Trình phát nhạc Audio hoặc Bộ gảy đệm Guitar tự động */}
+              {/* Trình phát video/audio đồng bộ với timeline */}
               <div className="bg-slate-900 text-slate-200 p-4 rounded-2xl border border-slate-800 space-y-2">
-                {song.audioPath ? (
+                {song.youtubeId ? (
+                  <>
+                    <div className="flex items-center gap-2 text-xs text-sky-300 font-semibold">
+                      <Volume2 className="w-4 h-4" /> Video YouTube đồng bộ lời & hợp âm
+                    </div>
+                    <YouTubePlayer
+                      ref={youtubePlayerRef}
+                      videoId={song.youtubeId}
+                      onTimeUpdate={setCurrentTime}
+                      onStateChange={setIsPlaying}
+                    />
+                  </>
+                ) : song.audioPath ? (
                   <>
                     <div className="flex items-center gap-2 text-xs text-sky-300 font-semibold">
                       <Volume2 className="w-4 h-4" /> Trình phát đồng bộ hợp âm
@@ -465,9 +488,9 @@ export default function SongDetailPage() {
                       ref={audioRef}
                       controls
                       src={song.audioPath}
-                      onPlay={() => setIsScrolling(true)}
-                      onPause={() => setIsScrolling(false)}
-                      onEnded={() => setIsScrolling(false)}
+                      onPlay={() => setIsPlaying(true)}
+                      onPause={() => setIsPlaying(false)}
+                      onEnded={() => setIsPlaying(false)}
                       onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)}
                       className="w-full h-9 accent-sky-400"
                     />
@@ -475,9 +498,9 @@ export default function SongDetailPage() {
                 ) : (
                   <div className="flex items-center justify-between gap-2 py-0.5">
                     <p className="text-xs text-slate-300">
-                      {isScrolling
+                      {isPlaying
                         ? `⏱️ Đang chạy hợp âm: ${formatTime(currentTime)}`
-                        : 'Bản Chord Sheet — Bấm Tự động cuộn để nghe tiếng đàn gảy theo nhịp.'}
+                        : 'Bản Chord Sheet — Phát để nghe tiếng đàn gảy theo nhịp.'}
                     </p>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <button
@@ -511,7 +534,7 @@ export default function SongDetailPage() {
                 )}
               </div>
 
-              {/* Công cụ Transpose Key & Auto Scroll */}
+              {/* Công cụ Transpose Key & Playback */}
               <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-500 uppercase">Transpose:</span>
@@ -538,14 +561,14 @@ export default function SongDetailPage() {
 
                 <button
                   type="button"
-                  onClick={handleToggleAutoScroll}
+                  onClick={handleTogglePlayback}
                   className={`px-4 py-2 rounded-xl font-bold text-xs transition flex items-center gap-1.5 shadow-sm cursor-pointer ${
-                    isScrolling
+                    isPlaying
                       ? 'bg-rose-600 hover:bg-rose-500 text-white'
                       : 'bg-slate-900 hover:bg-slate-800 text-white'
                   }`}
                 >
-                  {isScrolling ? '⏸ Dừng cuộn' : '📜 Tự động cuộn'}
+                  {isPlaying ? '⏸ Dừng phát' : '▶ Phát đồng bộ'}
                 </button>
               </div>
             </div>
@@ -612,7 +635,6 @@ export default function SongDetailPage() {
           </div>
 
           <div
-            ref={lyricsBoxRef}
             className="flex-1 overflow-y-auto max-h-140 mt-5 pr-1 relative"
           >
             {/* Hộp đàn Guitar ghim góc trên bên phải */}
@@ -632,7 +654,6 @@ export default function SongDetailPage() {
                   return (
                     <div
                       key={index}
-                      ref={isActive ? activeLineRef : null}
                       onClick={() => handleSeekToLine(line.time, line.chord, index)}
                       className={`p-3 rounded-xl cursor-pointer transition-all border ${
                         isActive

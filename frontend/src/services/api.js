@@ -8,7 +8,11 @@ const API = axios.create({
 API.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("token");
-    if (token) {
+    const expiresAt = Number(localStorage.getItem("tokenExpiresAt"));
+    if (token && expiresAt && expiresAt <= Date.now()) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("tokenExpiresAt");
+    } else if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;

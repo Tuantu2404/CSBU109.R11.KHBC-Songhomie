@@ -228,7 +228,7 @@ exports.deleteSong = async (req, res) => {
     }
 
     const userId = (req.user._id || req.user.id).toString();
-    if (song.user.toString() !== userId && req.user.role !== 'admin') {
+    if (song.user.toString() !== userId) {
       return res.status(403).json({ success: false, message: 'Bạn không có quyền xóa bài hát này' });
     }
 
