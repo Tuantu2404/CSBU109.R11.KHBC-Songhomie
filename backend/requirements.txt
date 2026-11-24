@@ -1,0 +1,11 @@
+numpy
+scipy
+soundfile
+librosa
+yt-dlp
+av
+requests
+faster-whisper
+onnxruntime
+audioread
+beartype==0.18.5

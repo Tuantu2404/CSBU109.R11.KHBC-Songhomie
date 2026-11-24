@@ -1,224 +1,183 @@
-const { spawn } = require('child_process');
-const path = require('path');
-const fs = require('fs');
-const os = require('os');
-const { cloudinary, uploadBufferToCloudinary } = require('../config/cloudinary');
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const crypto = require("crypto");
+const aiService = require("../services/aiService");
+const storageService = require("../services/storageService");
 
-// Hàm phụ xóa file tạm an toàn
-const cleanupTempFile = (filePath) => {
+function removeLocalFile(filePath) {
   if (filePath && fs.existsSync(filePath)) {
-    try {
-      fs.unlinkSync(filePath);
-    } catch (e) {
-      console.error('Không thể xóa file tạm:', e.message);
-    }
+    fs.unlink(filePath, () => {});
   }
-};
+}
 
-// Chuẩn hóa dữ liệu trả về từ Python AI để tương thích với SongDetailPage (GuitarFretboard)
-const formatAiOutput = (aiResult = {}) => {
-  const chords = Array.isArray(aiResult.chords)
-    ? aiResult.chords
-    : Array.isArray(aiResult.chordsAi)
-    ? aiResult.chordsAi
-    : [];
+function buildNormalizedAiPayload(result, extra = {}) {
+  const detectedKey =
+    result.key ||
+    result.chordsAi?.[0]?.chord ||
+    result.chords?.[0]?.chord ||
+    "C";
 
-  const lyricsText = aiResult.lyrics || aiResult.lyricsAi || '';
-  const lyricLines = lyricsText
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  // Tạo timeline đồng bộ từng câu hát + hợp âm theo giây nếu Python chưa trả về sẵn
-  const timeline = Array.isArray(aiResult.timeline) && aiResult.timeline.length > 0
-    ? aiResult.timeline
-    : chords.map((item, idx) => ({
-        time: Number(item.time) || idx * 4,
-        chord: item.chord || 'C',
-        text: lyricLines[idx] || `Đoạn nhạc ${idx + 1} (${item.chord || 'C'})`,
-      }));
-
-  // Tạo chuỗi lyricsChords gắn sẵn thẻ [Chord] để mở được trong Song Producer
-  const lyricsChords =
-    aiResult.lyricsChords ||
-    (timeline.length > 0
-      ? timeline.map((row) => `[${row.chord}] ${row.text}`).join('\n')
-      : lyricsText);
+  const syncedText =
+    result.lyricsChords ||
+    result.lyricsAi ||
+    result.lyrics ||
+    "";
 
   return {
-    ...aiResult,
-    chordsAi: chords,
-    lyricsAi: lyricsText,
-    timeline,
-    lyricsChords,
+    ...result,
+    key: detectedKey,
+    chordsAi: result.chordsAi || result.chords || [],
+    lyricsChords: syncedText,
+    lyricsAi: syncedText,
+    ...extra,
   };
-};
+}
 
-// @desc    Phân tích hợp âm từ YouTube URL qua Python AI Service
+// @desc    Phân tích hợp âm & lời bài hát từ link YouTube
 // @route   POST /api/ai/from-youtube
 exports.analyzeYoutube = async (req, res) => {
   try {
-    const { videoUrl } = req.body;
+    const videoUrl = (
+      req.body.videoUrl ||
+      req.body.youtubeUrl ||
+      req.body.url ||
+      ""
+    ).trim();
+    const language = (req.body.language || "auto").trim();
+    const lyricMode =
+      req.body.lyricMode === "transcribe" ? "transcribe" : "search";
+    const qualityMode = req.body.qualityMode === "studio" ? "studio" : "fast";
+
     if (!videoUrl) {
-      return res.status(400).json({ success: false, message: 'Vui lòng cung cấp URL YouTube' });
+      return res.status(400).json({
+        success: false,
+        message: "Vui lòng nhập đường dẫn video YouTube",
+      });
     }
 
-    const scriptPath = path.join(__dirname, '../scripts/chord_analyzer.py');
-    const pythonProcess = spawn('python', [scriptPath, videoUrl], {
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-    });
+    const result = await aiService.analyzeYoutube(
+      videoUrl,
+      language,
+      lyricMode,
+      qualityMode,
+    );
 
-    let dataString = '';
-    let errorString = '';
-
-    pythonProcess.stdout.on('data', (data) => {
-      dataString += data.toString('utf-8');
-    });
-
-    pythonProcess.stderr.on('data', (data) => {
-      errorString += data.toString('utf-8');
-    });
-
-    pythonProcess.on('error', (err) => {
+    if (!result || result.success === false) {
       return res.status(500).json({
         success: false,
-        message: 'Không thể khởi chạy tiến trình Python AI',
-        error: err.message,
+        message: result?.error || "Không thể phân tích video YouTube này",
       });
+    }
+
+    const normalizedData = buildNormalizedAiPayload(result, {
+      lyricMode,
+      qualityMode,
     });
 
-    pythonProcess.on('close', (code) => {
-      try {
-        if (!dataString.trim()) {
-          return res.status(500).json({
-            success: false,
-            message: 'Python AI không trả về dữ liệu',
-            error: errorString || `Exit code: ${code}`,
-          });
-        }
-
-        const rawResult = JSON.parse(dataString.trim());
-        const normalizedData = formatAiOutput(rawResult);
-
-        res.json({
-          success: true,
-          message: 'Phân tích AI từ YouTube hoàn tất',
-          data: normalizedData,
-        });
-      } catch (err) {
-        res.status(500).json({
-          success: false,
-          message: 'Lỗi parse dữ liệu từ Python AI',
-          error: errorString || err.message,
-        });
-      }
+    return res.json({
+      success: true,
+      data: normalizedData,
+      aiData: normalizedData,
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi máy chủ', error: error.message });
+    console.error("[AI YouTube Error]:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi máy chủ khi phân tích YouTube",
+    });
   }
 };
 
-// @desc    Phân tích hợp âm & bóc tách lời từ File Audio Upload
+// @desc    Phân tích hợp âm & lời bài hát từ file âm thanh tải lên (hỗ trợ memoryStorage & diskStorage)
 // @route   POST /api/ai/from-audio
 exports.analyzeAudio = async (req, res) => {
-  let localFilePath = null;
+  let tempFilePath = req.file?.path || "";
+  let createdFromBuffer = false;
 
   try {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: 'Vui lòng tải lên 1 file âm thanh (MP3, WAV)',
+        message: "Vui lòng chọn file âm thanh (.mp3, .wav, .m4a)",
       });
     }
 
-    // Hỗ trợ cả diskStorage (req.file.path) và memoryStorage (req.file.buffer)
-    if (req.file.path) {
-      localFilePath = req.file.path;
-    } else if (req.file.buffer) {
-      const safeName = `${Date.now()}_${req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-      localFilePath = path.join(os.tmpdir(), safeName);
-      fs.writeFileSync(localFilePath, req.file.buffer);
+    // Nếu multer dùng memoryStorage(), ghi buffer ra file tạm để Python & Cloudinary đọc được
+    if (!tempFilePath && req.file.buffer) {
+      const ext = path.extname(req.file.originalname || "") || ".mp3";
+      const uniqueName = `songhomie_upload_${Date.now()}_${crypto.randomBytes(4).toString("hex")}${ext}`;
+      tempFilePath = path.join(os.tmpdir(), uniqueName);
+      fs.writeFileSync(tempFilePath, req.file.buffer);
+      createdFromBuffer = true;
     }
 
-    const scriptPath = path.join(__dirname, '../scripts/chord_analyzer.py');
+    if (!tempFilePath || !fs.existsSync(tempFilePath)) {
+      return res.status(400).json({
+        success: false,
+        message: "Không đọc được dữ liệu file âm thanh tải lên.",
+      });
+    }
 
-    // 1. Thực thi Python AI Script trên file nhạc vừa upload
-    const pythonProcess = spawn('python', [scriptPath, localFilePath], {
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-    });
+    const language = (req.body.language || "auto").trim();
+    const lyricMode =
+      req.body.lyricMode === "transcribe" ? "transcribe" : "search";
+    const qualityMode = req.body.qualityMode === "studio" ? "studio" : "fast";
 
-    let dataString = '';
-    let errorString = '';
+    const result = await aiService.analyzeAudio(
+      tempFilePath,
+      language,
+      lyricMode,
+      qualityMode,
+    );
 
-    pythonProcess.stdout.on('data', (data) => {
-      dataString += data.toString('utf-8');
-    });
-
-    pythonProcess.stderr.on('data', (data) => {
-      errorString += data.toString('utf-8');
-    });
-
-    pythonProcess.on('error', (err) => {
-      cleanupTempFile(localFilePath);
+    if (!result || result.success === false) {
       return res.status(500).json({
         success: false,
-        message: 'Không thể khởi chạy tiến trình Python AI',
-        error: err.message,
+        message: result?.error || "Không thể phân tích file âm thanh",
       });
+    }
+
+    // Đẩy file nhạc lên Cloudinary để phát lại ở trang chi tiết bài hát
+    let audioPath = "";
+    try {
+      if (storageService && typeof storageService.uploadAudio === "function") {
+        audioPath = await storageService.uploadAudio(tempFilePath);
+      } else if (req.file.filename) {
+        audioPath = `/uploads/${req.file.filename}`;
+      }
+    } catch (uploadErr) {
+      console.error("Upload audio storage warning:", uploadErr.message);
+    }
+
+    const normalizedData = buildNormalizedAiPayload(result, {
+      lyricMode,
+      qualityMode,
+      audioPath,
     });
 
-    pythonProcess.on('close', async (code) => {
-      try {
-        if (!dataString.trim()) {
-          cleanupTempFile(localFilePath);
-          return res.status(500).json({
-            success: false,
-            message: 'Python AI không trả về dữ liệu phân tích',
-            error: errorString || `Exit code: ${code}`,
-          });
-        }
-
-        const rawAiResult = JSON.parse(dataString.trim());
-        const normalizedAiData = formatAiOutput(rawAiResult);
-
-        // 2. Upload file âm thanh lên Cloudinary lưu trữ lâu dài
-        let cloudinaryUrl = null;
-        if (process.env.CLOUDINARY_CLOUD_NAME) {
-          if (req.file.buffer) {
-            const uploadRes = await uploadBufferToCloudinary(
-              req.file.buffer,
-              'songhomie/audios'
-            );
-            cloudinaryUrl = uploadRes.secure_url;
-          } else {
-            const uploadRes = await cloudinary.uploader.upload(localFilePath, {
-              resource_type: 'auto',
-              folder: 'songhomie/audios',
-            });
-            cloudinaryUrl = uploadRes.secure_url;
-          }
-        }
-
-        // 3. Xóa file tạm sau khi xử lý xong
-        cleanupTempFile(localFilePath);
-
-        res.json({
-          success: true,
-          message: 'Bóc tách hợp âm và lời bài hát thành công!',
-          audioUrl: cloudinaryUrl,
-          aiData: normalizedAiData,
-        });
-      } catch (err) {
-        cleanupTempFile(localFilePath);
-        res.status(500).json({
-          success: false,
-          message: 'Lỗi xử lý file từ AI',
-          error: errorString || err.message,
-        });
-      }
+    return res.json({
+      success: true,
+      aiData: normalizedData,
+      audioUrl: audioPath,
+      data: normalizedData,
     });
   } catch (error) {
-    cleanupTempFile(localFilePath);
-    res.status(500).json({ success: false, message: 'Lỗi máy chủ', error: error.message });
+    console.error("[AI Audio Error]:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Lỗi máy chủ khi phân tích file âm thanh",
+    });
+  } finally {
+    if (
+      createdFromBuffer ||
+      (storageService && typeof storageService.uploadAudio === "function")
+    ) {
+      removeLocalFile(tempFilePath);
+    }
   }
 };
+
+exports.analyzeFromYoutube = exports.analyzeYoutube;
+exports.analyzeFromAudio = exports.analyzeAudio;
+exports.analyzeFile = exports.analyzeAudio;
