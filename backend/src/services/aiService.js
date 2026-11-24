@@ -1,7 +1,66 @@
 const { spawn } = require("child_process");
 const path = require("path");
+const crypto = require("crypto");
+const fs = require("fs");
 
 const SCRIPT_PATH = path.join(__dirname, "../scripts/chord_analyzer.py");
+
+// Giới hạn số tiến trình AI chạy song song để chống quá tải CPU/RAM
+const MAX_CONCURRENT_AI_JOBS = parseInt(
+  process.env.MAX_CONCURRENT_AI_JOBS || "1",
+  10,
+);
+let activeJobs = 0;
+const jobQueue = [];
+
+// Cache kết quả (tối đa 100 bài gần nhất) + gộp các request đang chạy trùng
+const resultCache = new Map();
+const inFlightRequests = new Map();
+const MAX_CACHE_ITEMS = 100;
+
+function getCacheKey(targetInput, language, lyricMode, qualityMode) {
+  let normalizedTarget = targetInput.trim();
+  if (!normalizedTarget.startsWith("http") && fs.existsSync(normalizedTarget)) {
+    const fileBuffer = fs.readFileSync(normalizedTarget);
+    const hash = crypto.createHash("md5").update(fileBuffer).digest("hex");
+    normalizedTarget = `file_${hash}`;
+  }
+  return `${normalizedTarget}|${language}|${lyricMode}|${qualityMode}`;
+}
+
+function saveToCache(key, value) {
+  if (resultCache.size >= MAX_CACHE_ITEMS) {
+    const oldestKey = resultCache.keys().next().value;
+    resultCache.delete(oldestKey);
+  }
+  resultCache.set(key, value);
+}
+
+function enqueueAiTask(taskFn) {
+  return new Promise((resolve, reject) => {
+    const runTask = async () => {
+      activeJobs++;
+      try {
+        const res = await taskFn();
+        resolve(res);
+      } catch (err) {
+        reject(err);
+      } finally {
+        activeJobs--;
+        if (jobQueue.length > 0) {
+          const nextJob = jobQueue.shift();
+          nextJob();
+        }
+      }
+    };
+
+    if (activeJobs < MAX_CONCURRENT_AI_JOBS) {
+      runTask();
+    } else {
+      jobQueue.push(runTask);
+    }
+  });
+}
 
 // Tách từng dòng [mm:ss.xx] (Hợp âm) Lời bài hát thành mảng timeline đồng bộ
 const parseLyricsToTimeline = (lyricsText, fallbackChords = []) => {
@@ -13,7 +72,6 @@ const parseLyricsToTimeline = (lyricsText, fallbackChords = []) => {
     .filter(Boolean);
 
   return lines.map((line, idx) => {
-    // Dạng 1: [01:15.86] (G) Nhưng anh ngồi đây...
     const lrcMatch = line.match(
       /^\[(\d+):(\d+(?:\.\d+)?)\]\s*\(([^)]+)\)\s*(.*)$/,
     );
@@ -27,7 +85,6 @@ const parseLyricsToTimeline = (lyricsText, fallbackChords = []) => {
       };
     }
 
-    // Dạng 2: [13.84s] (A#) [Beat Marker]
     const secMatch = line.match(
       /^\[(\d+(?:\.\d+)?)s?\]\s*\(([^)]+)\)\s*(.*)$/,
     );
@@ -39,7 +96,6 @@ const parseLyricsToTimeline = (lyricsText, fallbackChords = []) => {
       };
     }
 
-    // Dạng 3: [Am] Lời bài hát
     const chordMatch = line.match(/^\[([A-G][#b]?[^\]]*)\]\s*(.*)$/);
     if (chordMatch) {
       return {
@@ -93,7 +149,7 @@ const formatAiOutput = (aiResult = {}) => {
   };
 };
 
-// Trích xuất an toàn chuỗi JSON từ stdout (bỏ qua log/thanh tiến trình của thư viện AI)
+// Trích xuất an toàn chuỗi JSON từ stdout (bỏ qua log của thư viện AI)
 const parsePythonJsonOutput = (stdoutStr) => {
   const cleaned = stdoutStr.trim();
   const lines = cleaned
@@ -105,9 +161,7 @@ const parsePythonJsonOutput = (stdoutStr) => {
     if (lines[i].startsWith("{") && lines[i].endsWith("}")) {
       try {
         return JSON.parse(lines[i]);
-      } catch (_) {
-        // Bỏ qua nếu không phải JSON hoàn chỉnh
-      }
+      } catch (_) {}
     }
   }
 
@@ -120,12 +174,16 @@ const parsePythonJsonOutput = (stdoutStr) => {
   return JSON.parse(cleaned);
 };
 
-// Thực thi script Python phân tích hợp âm & lời bài hát (trả về Promise)
-const analyzeWithPython = (targetInput, language = "auto") => {
+const spawnPythonAnalyzer = (
+  targetInput,
+  safeLang,
+  safeMode,
+  safeQuality,
+) => {
   return new Promise((resolve, reject) => {
     const pythonProcess = spawn(
       "python",
-      [SCRIPT_PATH, targetInput, language],
+      [SCRIPT_PATH, targetInput, safeLang, safeMode, safeQuality],
       {
         env: { ...process.env, PYTHONIOENCODING: "utf-8" },
       },
@@ -175,8 +233,59 @@ const analyzeWithPython = (targetInput, language = "auto") => {
   });
 };
 
+// Thực thi qua Cache + Gộp request trùng + Hàng đợi giới hạn đồng thời
+const analyzeWithPython = (
+  targetInput,
+  language = "auto",
+  lyricMode = "search",
+  qualityMode = "fast",
+) => {
+  const safeLang = (language || "auto").trim();
+  const safeMode = lyricMode === "transcribe" ? "transcribe" : "search";
+  const safeQuality = qualityMode === "studio" ? "studio" : "fast";
+  const cacheKey = getCacheKey(targetInput, safeLang, safeMode, safeQuality);
+
+  if (resultCache.has(cacheKey)) {
+    return Promise.resolve({ ...resultCache.get(cacheKey), fromCache: true });
+  }
+
+  if (inFlightRequests.has(cacheKey)) {
+    return inFlightRequests.get(cacheKey);
+  }
+
+  const jobPromise = enqueueAiTask(() =>
+    spawnPythonAnalyzer(targetInput, safeLang, safeMode, safeQuality),
+  )
+    .then((formattedResult) => {
+      saveToCache(cacheKey, formattedResult);
+      return formattedResult;
+    })
+    .finally(() => {
+      inFlightRequests.delete(cacheKey);
+    });
+
+  inFlightRequests.set(cacheKey, jobPromise);
+  return jobPromise;
+};
+
+const analyzeYoutube = (
+  videoUrl,
+  language = "auto",
+  lyricMode = "search",
+  qualityMode = "fast",
+) => analyzeWithPython(videoUrl, language, lyricMode, qualityMode);
+
+const analyzeAudio = (
+  filePath,
+  language = "auto",
+  lyricMode = "search",
+  qualityMode = "fast",
+) => analyzeWithPython(filePath, language, lyricMode, qualityMode);
+
 module.exports = {
   analyzeWithPython,
+  analyzeYoutube,
+  analyzeAudio,
   formatAiOutput,
   parseLyricsToTimeline,
 };
