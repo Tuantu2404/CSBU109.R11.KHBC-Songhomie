@@ -83,6 +83,3 @@ Render service after changing its environment variables.
 3. If the browser reports a CORS error, verify the Vercel origin is included in
    Render's `CORS_ORIGINS`. If the request targets `localhost`, verify
    `VITE_API_URL` on Vercel and redeploy.
-
-Never commit `.env` files or share database connection strings, JWT secrets,
-Cloudinary secrets, or authentication tokens.

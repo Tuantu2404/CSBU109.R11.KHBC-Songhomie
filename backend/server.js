@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const connectDB = require("./src/config/database");
+const setupSwagger = require("./src/config/swagger");
 
 const corsOriginsSetting = process.env.CORS_ORIGINS || "";
 const allowedOrigins = (corsOriginsSetting || "http://localhost:5173")
@@ -26,6 +27,7 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const app = express();
+setupSwagger(app);
 const PORT = process.env.PORT || 5000;
 
 // 1. Connect to MongoDB Atlas
