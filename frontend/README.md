@@ -7,7 +7,7 @@
 
 ## Deploy on Vercel
 
-- Set **Root Directory** to `frontend`; use `npm run build` and `dist` as the
-  output directory.
+- Set **Root Directory** to `frontend`; use Node.js 26, `npm run build`, and
+  `dist` as the output directory.
 - Set `VITE_API_URL` to the Render API URL ending in `/api`, for example
   `https://your-api.onrender.com/api`.

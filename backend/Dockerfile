@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim
+FROM node:26-bookworm-slim
 
 # Cài đặt Python 3, FFmpeg và thư viện giải mã âm thanh hệ thống
 RUN apt-get update && apt-get install -y --no-install-recommends \

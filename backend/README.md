@@ -17,7 +17,7 @@ npm run dev
 
 ## Deploy on Render with Docker
 
-- Set **Root Directory** to `backend` and deploy using its `Dockerfile`.
+- Set **Root Directory** to `backend` and deploy using its `Dockerfile` (Node.js 26).
 - Set the health check path to `/api/health`.
 - Configure `MONGO_URI`, `JWT_SECRET`, `CLOUDINARY_CLOUD_NAME`,
   `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, and `CORS_ORIGINS`.
