@@ -14,6 +14,7 @@ import {
 import API from '../services/api';
 import { AuthContext } from '../context/AuthContext';
 import GuitarFretboard from '../components/GuitarFretboard';
+import { getVibeTagLabel } from '../utils/categoryLabels';
 
 const QUICK_CHORDS = ['C', 'G', 'Am', 'F', 'Dm', 'Em', 'D', 'E', 'A', 'Bm', 'Fmaj7', 'C7'];
 
@@ -29,7 +30,7 @@ export default function SongProducerPage() {
   const [vibeTag, setVibeTag] = useState('Chill & Share');
   const [lyricAlign, setLyricAlign] = useState('left');
   const [lyricsChords, setLyricsChords] = useState(
-    '[C] Nắng khẽ buông nhẹ [G] trên phím đàn\n[hl-yellow][Am] Từng nhịp âm thanh [F] vang lên dịu dàng[/hl-yellow]'
+    '[C] Morning light falls [G] across the strings\n[hl-yellow][Am] Every note [F] rings out softly[/hl-yellow]'
   );
 
   const [coverFile, setCoverFile] = useState(null);
@@ -67,7 +68,7 @@ export default function SongProducerPage() {
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
     if (start === end) {
-      alert('Hãy bôi đen một đoạn lời bài hát trước khi bấm tô sáng nhé!');
+      alert('Select some lyrics before applying a highlight.');
       return;
     }
 
@@ -83,7 +84,7 @@ export default function SongProducerPage() {
   const handlePublishSong = async (e) => {
     e.preventDefault();
     if (!user) {
-      alert('Vui lòng đăng nhập để xuất bản bản phối!');
+      alert('Please sign in to publish your arrangement.');
       return navigate('/login');
     }
 
@@ -110,7 +111,7 @@ export default function SongProducerPage() {
         navigate(`/songs/${res.data.data._id}`);
       }
     } catch (err) {
-      alert(err.response?.data?.message || 'Lỗi khi lưu bản phối bài hát.');
+      alert(err.response?.data?.message || 'Failed to save the arrangement.');
     } finally {
       setSaving(false);
     }
@@ -180,7 +181,7 @@ export default function SongProducerPage() {
             <Sparkles className="w-3.5 h-3.5" /> Songhomie Creator Studio
           </span>
           <h1 className="text-2xl md:text-3xl font-black text-slate-900">
-            Biên Soạn Lời & Hợp Âm (Song Producer)
+            Write Lyrics & Chords (Song Producer)
           </h1>
         </div>
       </div>
@@ -194,14 +195,14 @@ export default function SongProducerPage() {
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Tên bài hát *"
+              placeholder="Song title *"
               className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
             />
             <input
               type="text"
               value={artist}
               onChange={(e) => setArtist(e.target.value)}
-              placeholder="Ca sĩ / Người biên soạn"
+              placeholder="Artist / arranger"
               className="px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
             />
             <select
@@ -219,7 +220,7 @@ export default function SongProducerPage() {
                 type="text"
                 value={songKey}
                 onChange={(e) => setSongKey(e.target.value)}
-                placeholder="Tông (C, Am)"
+                placeholder="Key (C, Am)"
                 className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
               />
               <select
@@ -228,9 +229,9 @@ export default function SongProducerPage() {
                 className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
               >
                 <option value="Chill & Share">Chill & Share</option>
-                <option value="Acoustic Cuối Tuần">Acoustic Cuối Tuần</option>
-                <option value="Hợp Âm Dễ Tập">Hợp Âm Dễ Tập</option>
-                <option value="Góc AI Sáng Tác">Góc AI Sáng Tác</option>
+                <option value="Acoustic Cuối Tuần">{getVibeTagLabel("Acoustic Cuối Tuần")}</option>
+                <option value="Hợp Âm Dễ Tập">{getVibeTagLabel("Hợp Âm Dễ Tập")}</option>
+                <option value="Góc AI Sáng Tác">{getVibeTagLabel("Góc AI Sáng Tác")}</option>
               </select>
             </div>
           </div>
@@ -244,7 +245,7 @@ export default function SongProducerPage() {
                 className={`p-2 rounded-lg cursor-pointer ${
                   lyricAlign === 'left' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-600'
                 }`}
-                title="Căn trái"
+                title="Align left"
               >
                 <AlignLeft className="w-4 h-4" />
               </button>
@@ -254,7 +255,7 @@ export default function SongProducerPage() {
                 className={`p-2 rounded-lg cursor-pointer ${
                   lyricAlign === 'center' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-600'
                 }`}
-                title="Căn giữa"
+                title="Align center"
               >
                 <AlignCenter className="w-4 h-4" />
               </button>
@@ -264,7 +265,7 @@ export default function SongProducerPage() {
                 className={`p-2 rounded-lg cursor-pointer ${
                   lyricAlign === 'right' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-600'
                 }`}
-                title="Căn phải"
+                title="Align right"
               >
                 <AlignRight className="w-4 h-4" />
               </button>
@@ -277,21 +278,21 @@ export default function SongProducerPage() {
                 onClick={() => applyHighlight('yellow')}
                 className="px-2.5 py-1 rounded-lg bg-amber-200 text-amber-900 cursor-pointer"
               >
-                Điệp khúc
+                Chorus
               </button>
               <button
                 type="button"
                 onClick={() => applyHighlight('cyan')}
                 className="px-2.5 py-1 rounded-lg bg-sky-200 text-sky-900 cursor-pointer"
               >
-                Điểm nhấn
+                Emphasis
               </button>
               <button
                 type="button"
                 onClick={() => applyHighlight('green')}
                 className="px-2.5 py-1 rounded-lg bg-emerald-200 text-emerald-900 cursor-pointer"
               >
-                Ghi chú
+                Note
               </button>
             </div>
           </div>
@@ -319,12 +320,12 @@ export default function SongProducerPage() {
             className="w-full p-4 bg-slate-950 text-emerald-400 font-mono text-sm rounded-2xl border border-slate-800 focus:outline-none leading-relaxed"
           />
 
-          {/* Upload Ảnh bìa & Audio Cloudinary */}
+          {/* Upload cover art and audio to Cloudinary */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="flex items-center gap-2 p-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-xs text-slate-600 cursor-pointer">
               <Upload className="w-4 h-4 text-indigo-500 shrink-0" />
               <span className="truncate">
-                {coverFile ? coverFile.name : 'Chọn ảnh bìa (Cloudinary)'}
+                {coverFile ? coverFile.name : 'Choose cover art (Cloudinary)'}
               </span>
               <input
                 type="file"
@@ -337,7 +338,7 @@ export default function SongProducerPage() {
             <label className="flex items-center gap-2 p-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-xs text-slate-600 cursor-pointer">
               <Music className="w-4 h-4 text-indigo-500 shrink-0" />
               <span className="truncate">
-                {audioFile ? audioFile.name : 'Chọn file nhạc MP3/WAV'}
+                {audioFile ? audioFile.name : 'Choose an MP3/WAV audio file'}
               </span>
               <input
                 type="file"
@@ -354,7 +355,7 @@ export default function SongProducerPage() {
             className="w-full py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-sm inline-flex items-center justify-center gap-2 transition cursor-pointer"
           >
             <Save className="w-4 h-4" />
-            {saving ? 'Đang xuất bản bản phối...' : 'Xuất Bản & Mở Đàn Guitar'}
+            {saving ? 'Publishing arrangement...' : 'Publish & Open Guitar Player'}
           </button>
         </div>
 
@@ -363,7 +364,7 @@ export default function SongProducerPage() {
           <div className="space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <span className="inline-flex items-center gap-1.5 text-xs font-bold text-sky-400">
-                <Eye className="w-4 h-4" /> Xem trước trực tiếp (Live Preview)
+                <Eye className="w-4 h-4" /> Live Preview
               </span>
             </div>
 

@@ -365,7 +365,7 @@ def _convert_to_wav_fallback(input_path):
 
     container.close()
     if not chunks:
-        raise RuntimeError("Không giải mã được dữ liệu âm thanh từ file tải về")
+        raise RuntimeError("Unable to decode the downloaded audio.")
 
     audio_data = np.concatenate(chunks)
     sf.write(wav_path, audio_data, 22050)
@@ -718,7 +718,7 @@ def _build_timed_lyrics(lyrics_segments, chords_output, duration):
             "start": 0.0,
             "end": round(float(duration), 2),
             "chord": "",
-            "text": "Đoạn nhạc không lời",
+            "text": "Instrumental section",
             "isInstrumental": True,
         }]
     else:
@@ -728,7 +728,7 @@ def _build_timed_lyrics(lyrics_segments, chords_output, duration):
                 "start": 0.0,
                 "end": lyric_rows[0]["start"],
                 "chord": "",
-                "text": "Đoạn nhạc không lời",
+                "text": "Instrumental section",
                 "isInstrumental": True,
             })
 
@@ -788,7 +788,7 @@ def analyze_audio(
             except Exception as yt_err:
                 return {
                     "success": False,
-                    "error": f"Không tải được audio từ YouTube: {str(yt_err)}",
+                    "error": f"Unable to download audio from YouTube: {str(yt_err)}",
                 }
         else:
             fallback_title = (
@@ -802,7 +802,7 @@ def analyze_audio(
             }
 
         if not os.path.exists(file_path):
-            return {"success": False, "error": f"File không tồn tại: {file_path}"}
+            return {"success": False, "error": f"File not found: {file_path}"}
 
         import librosa
 
@@ -885,8 +885,8 @@ def analyze_audio(
         lyrics_warning = ""
         if not lyrics_segments:
             lyrics_warning = whisper_err or (
-                "Không nhận diện được lời bài hát. Hãy kiểm tra file có giọng hát rõ "
-                "và cấu hình GROQ_API_KEY hoặc cài Faster-Whisper trên máy chủ."
+                "Lyrics could not be detected. Make sure the file contains clear vocals "
+                "and configure GROQ_API_KEY or install Faster-Whisper on the server."
             )
 
         return {
@@ -907,7 +907,7 @@ def analyze_audio(
         }
 
     except ImportError as e:
-        return {"success": False, "error": f"Thiếu thư viện AI cần thiết: {e}"}
+        return {"success": False, "error": f"Missing required AI dependency: {e}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
     finally:
@@ -946,7 +946,7 @@ if __name__ == "__main__":
     else:
         print(
             json.dumps(
-                {"success": False, "error": "Thiếu đường dẫn file âm thanh đầu vào"},
+                {"success": False, "error": "Missing input audio file path."},
                 ensure_ascii=False,
             ),
             flush=True,

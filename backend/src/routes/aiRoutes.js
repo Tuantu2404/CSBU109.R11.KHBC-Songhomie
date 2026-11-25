@@ -8,13 +8,13 @@ const { analyzeYoutube, analyzeAudio } = require('../controllers/aiController');
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 25 * 1024 * 1024, // Giới hạn tối đa 25MB
+    fileSize: 25 * 1024 * 1024, // 25 MB maximum
   },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('audio/') || file.mimetype === 'application/octet-stream') {
       cb(null, true);
     } else {
-      cb(new Error('Chỉ hỗ trợ định dạng file âm thanh (MP3, WAV, OGG, M4A)'), false);
+      cb(new Error('Unsupported audio format. Only MP3, WAV, OGG, and M4A files are allowed.'), false);
     }
   },
 });

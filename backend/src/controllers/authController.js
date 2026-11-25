@@ -22,12 +22,12 @@ exports.register = async (req, res) => {
     const { username, email, password } = req.body;
 
     if (!username || !email || !password) {
-      return res.status(400).json({ success: false, message: 'Vui lòng điền đầy đủ thông tin' });
+      return res.status(400).json({ success: false, message: 'Please complete all required fields.' });
     }
 
     const userExists = await User.findOne({ email });
     if (userExists) {
-      return res.status(400).json({ success: false, message: 'Email này đã được sử dụng' });
+      return res.status(400).json({ success: false, message: 'This email address is already in use.' });
     }
 
     const user = await User.create({ username, email, password });
@@ -35,7 +35,7 @@ exports.register = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Đăng ký tài khoản thành công',
+      message: 'Account created successfully.',
       data: {
         _id: user._id,
         username: user.username,
@@ -46,7 +46,7 @@ exports.register = async (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi máy chủ', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error.', error: error.message });
   }
 };
 
@@ -61,7 +61,7 @@ exports.login = async (req, res) => {
       const authToken = generateToken(user._id);
       res.json({
         success: true,
-        message: 'Đăng nhập thành công',
+        message: 'Signed in successfully.',
         data: {
           _id: user._id,
           username: user.username,
@@ -72,10 +72,10 @@ exports.login = async (req, res) => {
         },
       });
     } else {
-      res.status(401).json({ success: false, message: 'Email hoặc mật khẩu không chính xác' });
+      res.status(401).json({ success: false, message: 'Invalid email or password.' });
     }
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi máy chủ', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error.', error: error.message });
   }
 };
 
@@ -86,6 +86,6 @@ exports.getMe = async (req, res) => {
     const user = await User.findById(req.user._id).select('-password');
     res.json({ success: true, data: user });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi máy chủ', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error.', error: error.message });
   }
 };

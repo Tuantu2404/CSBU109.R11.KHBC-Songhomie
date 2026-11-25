@@ -5,26 +5,26 @@ const userSchema = new mongoose.Schema(
   {
     username: {
       type: String,
-      required: [true, "Vui lòng nhập tên người dùng"],
+      required: [true, "Please enter a username."],
       unique: true,
       trim: true,
-      maxlength: [50, "Tên người dùng không vượt quá 50 ký tự"],
+      maxlength: [50, "Username cannot exceed 50 characters."],
     },
     email: {
       type: String,
-      required: [true, "Vui lòng nhập email"],
+      required: [true, "Please enter an email address."],
       unique: true,
       trim: true,
       lowercase: true,
-      maxlength: [100, "Email không vượt quá 100 ký tự"],
+      maxlength: [100, "Email cannot exceed 100 characters."],
       match: [
         /^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/,
-        "Email không đúng định dạng",
+        "Please enter a valid email address.",
       ],
     },
     password: {
       type: String,
-      required: [true, "Vui lòng nhập mật khẩu"],
+      required: [true, "Please enter a password."],
       select: false,
     },
     avatar: {

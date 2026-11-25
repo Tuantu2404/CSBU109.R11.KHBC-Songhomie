@@ -5,7 +5,6 @@ import Footer from './components/Footer';
 import HomePage from './pages/HomePage';
 import AiAnalyzerPage from './pages/AiAnalyzerPage';
 import RankingsPage from './pages/RankingsPage';
-import CompetitionsPage from './pages/CompetitionsPage';
 import ForumPage from './pages/ForumPage';
 import SongProducerPage from './pages/SongProducerPage';
 import LoginPage from './pages/LoginPage';
@@ -25,7 +24,6 @@ export default function App() {
               <Route path="/ai-analyzer" element={<AiAnalyzerPage />} />
               <Route path="/producer" element={<SongProducerPage />} />
               <Route path="/rankings" element={<RankingsPage />} />
-              <Route path="/competitions" element={<CompetitionsPage />} />
               <Route path="/forum" element={<ForumPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />

@@ -52,7 +52,7 @@ exports.analyzeYoutube = async (req, res) => {
     if (!videoUrl) {
       return res.status(400).json({
         success: false,
-        message: "Vui lòng nhập đường dẫn video YouTube",
+        message: "Please enter a YouTube video URL.",
       });
     }
 
@@ -66,7 +66,7 @@ exports.analyzeYoutube = async (req, res) => {
     if (!result || result.success === false) {
       return res.status(500).json({
         success: false,
-        message: result?.error || "Không thể phân tích video YouTube này",
+        message: result?.error || "Unable to analyze this YouTube video.",
       });
     }
 
@@ -84,7 +84,7 @@ exports.analyzeYoutube = async (req, res) => {
     console.error("[AI YouTube Error]:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi máy chủ khi phân tích YouTube",
+      message: error.message || "Server error while analyzing the YouTube video.",
     });
   }
 };
@@ -99,7 +99,7 @@ exports.analyzeAudio = async (req, res) => {
     if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: "Vui lòng chọn file âm thanh (.mp3, .wav, .m4a)",
+        message: "Please choose an audio file (.mp3, .wav, or .m4a).",
       });
     }
 
@@ -115,7 +115,7 @@ exports.analyzeAudio = async (req, res) => {
     if (!tempFilePath || !fs.existsSync(tempFilePath)) {
       return res.status(400).json({
         success: false,
-        message: "Không đọc được dữ liệu file âm thanh tải lên.",
+        message: "Unable to read the uploaded audio file.",
       });
     }
 
@@ -138,7 +138,7 @@ exports.analyzeAudio = async (req, res) => {
     if (!result || result.success === false) {
       return res.status(500).json({
         success: false,
-        message: result?.error || "Không thể phân tích file âm thanh",
+        message: result?.error || "Unable to analyze the audio file.",
       });
     }
 
@@ -150,11 +150,11 @@ exports.analyzeAudio = async (req, res) => {
         audioPath = await storageService.uploadAudioToCloud(req.file, tempFilePath);
       }
       if (!audioPath) {
-        audioWarning = "Không lưu được audio gốc. Hãy kiểm tra cấu hình Cloudinary của backend.";
+        audioWarning = "Unable to save the original audio. Check the backend's Cloudinary configuration.";
       }
     } catch (uploadErr) {
       console.error("Upload audio storage warning:", uploadErr.message);
-      audioWarning = "Không thể tải audio gốc lên bộ lưu trữ: " + uploadErr.message;
+      audioWarning = "Unable to upload the original audio to storage: " + uploadErr.message;
     }
 
     const normalizedData = buildNormalizedAiPayload(result, {
@@ -175,7 +175,7 @@ exports.analyzeAudio = async (req, res) => {
     console.error("[AI Audio Error]:", error);
     return res.status(500).json({
       success: false,
-      message: error.message || "Lỗi máy chủ khi phân tích file âm thanh",
+      message: error.message || "Server error while analyzing the audio file.",
     });
   } finally {
     if (

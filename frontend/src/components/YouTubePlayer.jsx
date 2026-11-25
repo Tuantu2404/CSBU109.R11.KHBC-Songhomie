@@ -100,7 +100,7 @@ const YouTubePlayer = forwardRef(function YouTubePlayer(
     <div className={`aspect-video w-full overflow-hidden rounded-xl bg-black ${className}`}>
       {loadError ? (
         <p className="flex h-full items-center justify-center px-4 text-center text-sm text-white">
-          Không thể tải trình phát YouTube.
+          Unable to load the YouTube player.
         </p>
       ) : (
         <div ref={containerRef} className="h-full w-full" />

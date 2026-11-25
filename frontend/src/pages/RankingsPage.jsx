@@ -3,13 +3,14 @@ import { Link } from 'react-router-dom';
 import { Guitar, Music, Sparkles, PlusCircle } from 'lucide-react';
 import API from '../services/api';
 import { AuthContext } from '../context/AuthContext';
+import { getVibeTagLabel } from '../utils/categoryLabels';
 
 const VIBE_TABS = [
-  { id: 'All', label: '✨ Tất cả giai điệu' },
+  { id: 'All', label: '✨ All Songs' },
   { id: 'Chill & Share', label: '☕ Chill & Share' },
-  { id: 'Acoustic Cuối Tuần', label: '🎸 Acoustic Cuối Tuần' },
-  { id: 'Hợp Âm Dễ Tập', label: '🌱 Hợp Âm Dễ Tập' },
-  { id: 'Góc AI Sáng Tác', label: '🤖 Góc AI Sáng Tác' },
+  { id: 'Acoustic Cuối Tuần', label: '🎸 Weekend Acoustic' },
+  { id: 'Hợp Âm Dễ Tập', label: '🌱 Easy Chord Sheets' },
+  { id: 'Góc AI Sáng Tác', label: '🤖 AI Songwriting' },
 ];
 
 export default function RankingsPage() {
@@ -42,7 +43,7 @@ export default function RankingsPage() {
   // Thả cảm xúc cổ vũ tích cực ngay tại danh sách
   const handleReaction = async (songId, reactionType) => {
     if (!user) {
-      alert('Vui lòng đăng nhập để gửi lời cổ vũ tới bạn bè nhé!');
+      alert('Please sign in to cheer on the community.');
       return;
     }
     try {
@@ -51,7 +52,7 @@ export default function RankingsPage() {
         prev.map((s) => (s._id === songId ? { ...s, reactions: res.data.data } : s))
       );
     } catch (err) {
-      console.error('Lỗi thả cảm xúc:', err);
+      console.error('Failed to update reaction:', err);
     }
   };
 
@@ -76,10 +77,11 @@ export default function RankingsPage() {
             <Sparkles className="w-3.5 h-3.5" /> Music Hobbies & Good Vibes Only
           </div>
           <h1 className="text-3xl font-extrabold text-slate-900">
-            🎶 Giai Điệu Truyền Cảm Hứng
+            🎶 Inspiring Songs
           </h1>
           <p className="text-slate-600 text-sm mt-1">
-            Không chạy đua thứ hạng — cùng khám phá các bản hợp âm dễ tập, bản phối AI thú vị và gửi lời cổ vũ cho nhau.
+            No leaderboard pressure—discover approachable chord sheets and AI
+            arrangements, and encourage one another.
           </p>
         </div>
 
@@ -87,7 +89,7 @@ export default function RankingsPage() {
           to="/producer"
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-slate-900 hover:bg-sky-500 hover:text-slate-950 text-white text-xs font-bold transition shrink-0 shadow-sm"
         >
-          <PlusCircle className="w-4 h-4" /> Chia sẻ bản hợp âm
+          <PlusCircle className="w-4 h-4" /> Share a Chord Sheet
         </Link>
       </div>
 
@@ -112,16 +114,16 @@ export default function RankingsPage() {
       {/* --- DANH SÁCH GIAI ĐIỆU CỘNG ĐỒNG --- */}
       {loading ? (
         <div className="text-center py-12 text-slate-500 font-medium">
-          Đang tải không gian giai điệu...
+          Loading songs...
         </div>
       ) : (
         <div className="bg-white rounded-3xl shadow-sm border border-slate-200/80 overflow-hidden">
           <div className="p-6 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between">
             <h2 className="text-lg font-extrabold text-slate-800">
-              ✨ Góc Chia Sẻ Đam Mê ({displayedSongs.length} bài hát)
+              ✨ Community Favorites ({displayedSongs.length} songs)
             </h2>
             <span className="text-xs text-slate-400 font-medium">
-              Bấm vào bài hát để mở cần đàn Guitar
+              Select a song to open the guitar fretboard
             </span>
           </div>
 
@@ -160,13 +162,13 @@ export default function RankingsPage() {
                             {song.title || 'Untitled Song'}
                           </Link>
                           <span className="px-2.5 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200/80 text-[11px] font-bold">
-                            {song.vibeTag || 'Chill & Share'}
+                            {getVibeTagLabel(song.vibeTag)}
                           </span>
                         </div>
 
                         <p className="text-xs text-slate-500 mt-1 truncate">
                           Artist: <span className="font-semibold text-slate-700">{song.artist || 'Various Artists'}</span>{' '}
-                          • Genre: {song.genre || 'Acoustic'} • 🎧 {song.views || 0} lượt tập
+                          • Genre: {song.genre || 'Acoustic'} • 🎧 {song.views || 0} plays
                         </p>
                       </div>
                     </div>
@@ -176,7 +178,7 @@ export default function RankingsPage() {
                       <button
                         type="button"
                         onClick={() => handleReaction(song._id, 'clap')}
-                        title="Vỗ tay cổ vũ"
+                        title="Clap to cheer"
                         className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-sky-100 text-slate-700 text-xs font-bold transition cursor-pointer"
                       >
                         👏 {claps}
@@ -184,7 +186,7 @@ export default function RankingsPage() {
                       <button
                         type="button"
                         onClick={() => handleReaction(song._id, 'guitar')}
-                        title="Hợp âm hay"
+                        title="Great chords"
                         className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-sky-100 text-slate-700 text-xs font-bold transition cursor-pointer"
                       >
                         🎸 {guitars}
@@ -192,7 +194,7 @@ export default function RankingsPage() {
                       <button
                         type="button"
                         onClick={() => handleReaction(song._id, 'heart')}
-                        title="Truyền cảm hứng"
+                        title="Inspiring"
                         className="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-sky-100 text-slate-700 text-xs font-bold transition cursor-pointer"
                       >
                         ❤️ {hearts}
@@ -202,7 +204,7 @@ export default function RankingsPage() {
                         to={`/songs/${song._id}`}
                         className="inline-flex items-center gap-1.5 ml-1 px-3.5 py-1.5 rounded-xl bg-indigo-50 hover:bg-sky-400 text-indigo-700 hover:text-slate-950 text-xs font-extrabold transition"
                       >
-                        <Guitar className="w-3.5 h-3.5" /> Mở đàn
+                        <Guitar className="w-3.5 h-3.5" /> Open Player
                       </Link>
                     </div>
                   </div>
@@ -210,7 +212,7 @@ export default function RankingsPage() {
               })
             ) : (
               <div className="p-10 text-center text-slate-400 text-sm">
-                Chưa có bài hát nào trong chủ đề này. Hãy là người đầu tiên chia sẻ nhé!
+                No songs in this category yet. Be the first to share one!
               </div>
             )}
           </div>

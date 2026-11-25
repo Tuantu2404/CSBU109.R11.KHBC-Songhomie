@@ -4,14 +4,14 @@ const songSchema = new mongoose.Schema(
   {
     title: {
       type: String,
-      required: [true, "Vui lòng nhập tên bài hát"],
+      required: [true, "Please enter a song title."],
       trim: true,
-      maxlength: [255, "Tên bài hát tối đa 255 ký tự"],
+      maxlength: [255, "Song title cannot exceed 255 characters."],
     },
     artist: {
       type: String,
       trim: true,
-      maxlength: [100, "Tên ca sĩ tối đa 100 ký tự"],
+      maxlength: [100, "Artist name cannot exceed 100 characters."],
       default: "Unknown",
     },
     key: {

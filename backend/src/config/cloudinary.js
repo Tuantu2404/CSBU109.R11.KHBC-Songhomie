@@ -16,7 +16,7 @@ const fileFilter = (req, file, cb) => {
   if (isImage || isAudio) {
     cb(null, true);
   } else {
-    cb(new Error('Chỉ hỗ trợ định dạng file ảnh (JPG, PNG, WEBP) hoặc âm thanh (MP3, WAV, OGG)'), false);
+    cb(new Error('Unsupported file format. Only JPG, PNG, WEBP, MP3, WAV, and OGG files are allowed.'), false);
   }
 };
 
@@ -24,7 +24,7 @@ const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 25 * 1024 * 1024, // Giới hạn tối đa 25MB/file
+    fileSize: 25 * 1024 * 1024, // 25 MB maximum per file
   },
 });
 

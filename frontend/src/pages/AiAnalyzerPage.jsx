@@ -1,24 +1,12 @@
 import { useState, useContext, useRef } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
-  Upload,
-  Video,
   Guitar,
-  Save,
   Sparkles,
-  Sliders,
   Music,
 } from "lucide-react";
 import API from "../services/api";
 import { AuthContext } from "../context/AuthContext";
-import YouTubePlayer from "../components/YouTubePlayer";
-
-const extractYoutubeId = (url = "") => {
-  const match = url.match(
-    /(?:youtube\.com\/(?:[^/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?/\s]{11})/,
-  );
-  return match ? match[1] : "";
-};
 
 const formatTime = (seconds) => {
   const safe = Math.max(0, Math.floor(Number(seconds) || 0));
@@ -61,13 +49,10 @@ const parseEditedTimelineLine = (line, previousLine) => {
 };
 
 export default function AiAnalyzerPage() {
-  const [activeTab, setActiveTab] = useState("ai"); // 'ai' | 'manual'
-  const [aiSourceMode, setAiSourceMode] = useState("audio"); // 'audio' | 'youtube'
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
 
   // State chế độ AI
-  const [videoUrl, setVideoUrl] = useState("");
   const [audioFile, setAudioFile] = useState(null);
   const [audioTrackTitle, setAudioTrackTitle] = useState("");
   const [audioTrackArtist, setAudioTrackArtist] = useState("");
@@ -75,37 +60,23 @@ export default function AiAnalyzerPage() {
   const [editableLyrics, setEditableLyrics] = useState("");
   const [aiAudioUrl, setAiAudioUrl] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiResultSource, setAiResultSource] = useState("");
-  const [aiResultVideoId, setAiResultVideoId] = useState("");
   const [aiCurrentTime, setAiCurrentTime] = useState(0);
   const aiAudioRef = useRef(null);
-  const aiYoutubePlayerRef = useRef(null);
 
   // Thông tin để lưu kết quả AI thành bài hát
   const [aiSongTitle, setAiSongTitle] = useState("");
   const [aiSongArtist, setAiSongArtist] = useState("");
   const [aiSaving, setAiSaving] = useState(false);
 
-  // State chế độ Tự soạn thủ công
-  const [title, setTitle] = useState("");
-  const [artist, setArtist] = useState("");
-  const [genre, setGenre] = useState("Acoustic");
-  const [key, setKey] = useState("C");
-  const [vibeTag, setVibeTag] = useState("Chill & Share");
-  const [lyrics, setLyrics] = useState("");
-  const [manualCover, setManualCover] = useState(null);
-  const [manualAudio, setManualAudio] = useState(null);
-  const [saveLoading, setSaveLoading] = useState(false);
-
   // 1. Phân tích AI từ File Audio Upload (Python AI + Cloudinary)
   const handleAnalyzeAudio = async (e) => {
     e.preventDefault();
     if (!user) {
-      alert("Vui lòng đăng nhập để sử dụng công cụ AI phân tích nhạc!");
+      alert("Please sign in to use the AI music analyzer.");
       return navigate("/login");
     }
     if (!audioFile) {
-      alert("Vui lòng chọn 1 file âm thanh (MP3, WAV) trước nhé!");
+      alert("Please choose an audio file (MP3 or WAV) first.");
       return;
     }
 
@@ -126,7 +97,6 @@ export default function AiAnalyzerPage() {
 
       const data = res.data.aiData;
       setAiResult(data);
-      setAiResultSource("audio");
       setAiCurrentTime(0);
       setEditableLyrics(
         data?.lyricsChords ||
@@ -146,56 +116,17 @@ export default function AiAnalyzerPage() {
       }
     } catch (err) {
       alert(
-        err.response?.data?.message || "Lỗi phân tích file âm thanh từ AI.",
+        err.response?.data?.message || "AI audio analysis failed.",
       );
     } finally {
       setAiLoading(false);
     }
   };
 
-  // 2. Phân tích AI từ YouTube URL
-  const handleAnalyzeYoutube = async (e) => {
-    e.preventDefault();
-    if (!user) {
-      alert("Vui lòng đăng nhập để sử dụng công cụ AI phân tích nhạc!");
-      return navigate("/login");
-    }
-
-    setAiLoading(true);
-    setAiResult(null);
-    setEditableLyrics("");
-    setAiAudioUrl("");
-    try {
-      const res = await API.post("/ai/from-youtube", { videoUrl });
-      const data = res.data.data;
-      setAiResult(data);
-      setAiResultSource("youtube");
-      setAiResultVideoId(extractYoutubeId(videoUrl));
-      setAiCurrentTime(0);
-      setEditableLyrics(
-        data?.lyricsChords ||
-          data?.lyricsAi ||
-          JSON.stringify(data?.chordsAi || [], null, 2),
-      );
-      if (!aiSongTitle && data?.detectedTitle) {
-        setAiSongTitle(data.detectedTitle);
-      } else if (!aiSongTitle) {
-        setAiSongTitle("YouTube AI Chord Sheet");
-      }
-    } catch (err) {
-      alert(
-        err.response?.data?.message ||
-          "Không thể phân tích link YouTube. Hãy kiểm tra lại Backend.",
-      );
-    } finally {
-      setAiLoading(false);
-    }
-  };
-
-  // 3. Lưu kết quả phân tích AI vào MongoDB & mở trang Đàn Guitar
+  // 2. Save the AI analysis to MongoDB and open guitar practice
   const handleSaveAiSong = async () => {
     if (!user) {
-      alert("Vui lòng đăng nhập để lưu bài hát!");
+      alert("Please sign in to save this song.");
       return navigate("/login");
     }
     if (!aiResult) return;
@@ -220,8 +151,6 @@ export default function AiAnalyzerPage() {
         genre: "Acoustic",
         key: aiResult.chordsAi?.[0]?.chord || "C",
         audioPath: aiAudioUrl || "",
-        youtubeId:
-          aiResultSource === "youtube" ? aiResultVideoId : undefined,
         chordsAi: aiResult.chordsAi || [],
         timeline: updatedTimeline,
         lyricsChords: editableLyrics || aiResult.lyricsChords || aiResult.lyricsAi || "",
@@ -239,56 +168,17 @@ export default function AiAnalyzerPage() {
       alert(
         err.response?.data?.error ||
           err.response?.data?.message ||
-          "Lỗi khi lưu bản phân tích AI.",
+          "Failed to save the AI analysis.",
       );
     } finally {
       setAiSaving(false);
     }
   };
 
-  // 4. Lưu bài hát tự soạn thủ công (Hỗ trợ kèm Cover & Audio lên Cloudinary)
-  const handleCreateManualSong = async (e) => {
-    e.preventDefault();
-    if (!user) {
-      alert("Vui lòng đăng nhập để lưu bản hợp âm của bạn!");
-      return navigate("/login");
-    }
-
-    setSaveLoading(true);
-    try {
-      const formData = new FormData();
-      formData.append("title", title);
-      formData.append("artist", artist || "Songhomie Member");
-      formData.append("genre", genre);
-      formData.append("key", key);
-      formData.append("vibeTag", vibeTag);
-      formData.append("lyricsChords", lyrics);
-      formData.append("type", "shared");
-
-      if (manualCover) formData.append("cover", manualCover);
-      if (manualAudio) formData.append("audio", manualAudio);
-
-      const res = await API.post("/songs", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-
-      if (res.data.data?._id) {
-        navigate(`/songs/${res.data.data._id}`);
-      }
-    } catch (err) {
-      alert(err.response?.data?.message || "Không thể lưu bản hợp âm.");
-    } finally {
-      setSaveLoading(false);
-    }
-  };
-
   const handleSeekToAiLine = (line) => {
     const time = Number(line.time) || 0;
     setAiCurrentTime(time);
-    if (aiResultSource === "youtube") {
-      aiYoutubePlayerRef.current?.seekTo(time);
-      aiYoutubePlayerRef.current?.play();
-    } else if (aiAudioRef.current) {
+    if (aiAudioRef.current) {
       aiAudioRef.current.currentTime = time;
       aiAudioRef.current.play().catch(() => {});
     }
@@ -310,87 +200,29 @@ export default function AiAnalyzerPage() {
           <Sparkles className="w-3.5 h-3.5" /> AI Chord & Lyric Assistant
         </span>
         <h1 className="text-3xl font-black text-slate-900 tracking-tight">
-          Tạo & Bóc Tách Hợp Âm Thông Minh
+          Create & Analyze Chords with AI
         </h1>
         <p className="text-slate-500 text-sm">
-          Tải file nhạc lên để AI tự động nhận diện hợp âm, hoặc tự soạn bản đệm
-          hát để chia sẻ cùng bạn bè.
+          Upload an audio file for automatic chord detection, then save your
+          analysis to your library.
         </p>
       </div>
 
-      {/* --- MODE SWITCHER TABS --- */}
-      <div className="flex bg-slate-200/80 p-1.5 rounded-2xl max-w-md mx-auto shadow-inner text-sm font-bold">
-        <button
-          type="button"
-          onClick={() => setActiveTab("ai")}
-          className={`flex-1 py-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === "ai"
-              ? "bg-white text-indigo-600 shadow-md"
-              : "text-slate-600 hover:text-slate-900"
-          }`}
-        >
-          <span>🤖 AI Auto Extract</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("manual")}
-          className={`flex-1 py-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer ${
-            activeTab === "manual"
-              ? "bg-white text-indigo-600 shadow-md"
-              : "text-slate-600 hover:text-slate-900"
-          }`}
-        >
-          <span>✍️ Tự Soạn Nhanh</span>
-        </button>
-      </div>
-
       {/* ===================================================================== */}
-      {/* TAB 1: AI AUTO EXTRACT (FILE AUDIO CLOUDINARY + YOUTUBE)              */}
+      {/* AI AUTO EXTRACT (FILE AUDIO CLOUDINARY)                               */}
       {/* ===================================================================== */}
-      {activeTab === "ai" && (
-        <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-200/80 shadow-sm space-y-6">
-          {/* Chọn nguồn đầu vào cho AI */}
+      <div className="bg-white p-6 md:p-8 rounded-3xl border border-slate-200/80 shadow-sm space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-xl font-bold text-slate-800">
-                Bóc tách hợp âm tự động bằng AI
+                AI-Powered Chord Detection
               </h2>
               <p className="text-xs text-slate-400 mt-1">
-                Hỗ trợ tải file âm thanh trực tiếp (đồng bộ cần đàn Guitar) hoặc
-                dán link YouTube.
+                Upload an audio file to detect chords and sync lyrics with the guitar fretboard.
               </p>
-            </div>
-
-            <div className="flex gap-2 bg-slate-100 p-1 rounded-xl text-xs font-bold">
-              <button
-                type="button"
-                disabled={aiLoading}
-                onClick={() => setAiSourceMode("audio")}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg transition cursor-pointer disabled:opacity-50 ${
-                  aiSourceMode === "audio"
-                    ? "bg-slate-900 text-white"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <Upload className="w-3.5 h-3.5" /> File Audio
-              </button>
-              <button
-                type="button"
-                disabled={aiLoading}
-                onClick={() => setAiSourceMode("youtube")}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg transition cursor-pointer disabled:opacity-50 ${
-                  aiSourceMode === "youtube"
-                    ? "bg-rose-600 text-white"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                <Video className="w-3.5 h-3.5" /> YouTube URL
-              </button>
             </div>
           </div>
 
-          {/* Form 1A: Upload File Audio */}
-          {aiSourceMode === "audio" ? (
             <form onSubmit={handleAnalyzeAudio} className="space-y-4">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <input
@@ -398,28 +230,29 @@ export default function AiAnalyzerPage() {
                   value={audioTrackTitle}
                   onChange={(e) => setAudioTrackTitle(e.target.value)}
                   disabled={aiLoading}
-                  placeholder="Tên bài hát (để tìm lời đồng bộ)"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  placeholder="Song title (to find synced lyrics)"
+                  className="w-full rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-950 placeholder:text-indigo-400 transition focus:border-indigo-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400/40"
                 />
                 <input
                   type="text"
                   value={audioTrackArtist}
                   onChange={(e) => setAudioTrackArtist(e.target.value)}
                   disabled={aiLoading}
-                  placeholder="Ca sĩ (không bắt buộc)"
-                  className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  placeholder="Artist (optional)"
+                  className="w-full rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-950 placeholder:text-violet-400 transition focus:border-violet-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-violet-400/40"
                 />
               </div>
-              <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-slate-300 hover:border-indigo-500 rounded-2xl bg-slate-50/70 cursor-pointer transition text-center">
+              <label className="flex flex-col items-center justify-center p-8 border-2 border-dashed border-indigo-300 hover:border-violet-400 rounded-2xl bg-linear-to-r from-indigo-50 via-violet-50 to-sky-50 hover:shadow-md cursor-pointer transition text-center">
                 <Music className="w-10 h-10 text-indigo-500 mb-2" />
                 <span className="text-sm font-bold text-slate-700">
                   {audioFile
-                    ? `Đã chọn: ${audioFile.name}`
-                    : "Bấm để chọn file âm thanh (MP3, WAV, OGG - Tối đa 25MB)"}
+                    ? `Selected: ${audioFile.name}`
+                    : "Choose an audio file (MP3, WAV, OGG — up to 25 MB)"}
                 </span>
                 <span className="text-xs text-slate-400 mt-1">
-                  AI tìm lời đồng bộ theo tên bài trước, sau đó tự nghe file nếu
-                  chưa tìm thấy; mốc thời gian lấy từ chính file này.
+                  AI first searches for synced lyrics by song title, then
+                  transcribes the audio if none are found. Timing comes from
+                  this audio file.
                 </span>
                 <input
                   type="file"
@@ -438,41 +271,13 @@ export default function AiAnalyzerPage() {
                 {aiLoading ? (
                   <>
                     <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>AI đang phân tích bạn chờ chút nhé :&lt;&lt;</span>
+                    <span>Analyzing with AI... Please wait.</span>
                   </>
                 ) : (
-                  <span>Bắt đầu phân tích File Nhạc</span>
+                  <span>Analyze Audio File</span>
                 )}
               </button>
             </form>
-          ) : (
-            /* Form 1B: Dán Link YouTube */
-            <form onSubmit={handleAnalyzeYoutube} className="space-y-4">
-              <input
-                type="text"
-                placeholder="https://www.youtube.com/watch?v=..."
-                value={videoUrl}
-                disabled={aiLoading}
-                onChange={(e) => setVideoUrl(e.target.value)}
-                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm disabled:opacity-60"
-                required
-              />
-              <button
-                type="submit"
-                disabled={aiLoading}
-                className="w-full py-4 bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-2xl shadow-lg shadow-indigo-500/25 transition disabled:opacity-80 text-sm flex items-center justify-center gap-2.5 cursor-pointer"
-              >
-                {aiLoading ? (
-                  <>
-                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    <span>AI đang phân tích bạn chờ chút nhé :&lt;&lt;</span>
-                  </>
-                ) : (
-                  <span>Bắt đầu phân tích YouTube</span>
-                )}
-              </button>
-            </form>
-          )}
 
           {/* Khung hoạt ảnh loading trực quan để người dùng biết hệ thống đang chạy */}
           {aiLoading && (
@@ -487,12 +292,10 @@ export default function AiAnalyzerPage() {
 
               <div className="space-y-1">
                 <p className="text-base font-extrabold text-indigo-900">
-                  AI đang phân tích bạn chờ chút nhé :&lt;&lt;
+                  AI is analyzing your audio. Please wait.
                 </p>
                 <p className="text-xs text-slate-600 max-w-md mx-auto leading-relaxed">
-                  {aiSourceMode === "youtube"
-                    ? "Đang tải âm thanh từ YouTube, nhận diện hợp âm Guitar và đồng bộ lời bài hát..."
-                    : "Đang quét hợp âm theo từng nhịp, đồng bộ lời bài hát và tải file lên Cloudinary..."}
+                  Detecting chords, syncing lyrics, and uploading the audio to Cloudinary...
                 </p>
               </div>
 
@@ -508,23 +311,22 @@ export default function AiAnalyzerPage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <h3 className="text-lg font-extrabold text-slate-800">
-                    ✨ Kết quả bóc tách từ AI
+                    ✨ AI Analysis Results
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Bạn có thể bấm trực tiếp vào khung dưới để chỉnh sửa nếu cần
-                    trước khi lưu.
+                    Edit the content below if needed before saving.
                   </p>
                 </div>
                 {aiAudioUrl && (
                   <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200">
-                    ✓ Đã lưu audio trên Cloudinary
+                    ✓ Audio saved to Cloudinary
                   </span>
                 )}
               </div>
 
                 {aiResult.lyricsWarning && (
                   <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                    Chưa nhận diện được lời: {aiResult.lyricsWarning}
+                    Lyrics not detected: {aiResult.lyricsWarning}
                   </p>
                 )}
                 {aiResult.audioWarning && (
@@ -533,13 +335,7 @@ export default function AiAnalyzerPage() {
                   </p>
                 )}
 
-              {aiResultSource === "youtube" && aiResultVideoId ? (
-                <YouTubePlayer
-                  ref={aiYoutubePlayerRef}
-                  videoId={aiResultVideoId}
-                  onTimeUpdate={setAiCurrentTime}
-                />
-              ) : aiAudioUrl ? (
+              {aiAudioUrl ? (
                 <audio
                   ref={aiAudioRef}
                   controls
@@ -552,7 +348,7 @@ export default function AiAnalyzerPage() {
               {Array.isArray(aiResult.timeline) && aiResult.timeline.length > 0 && (
                 <div className="max-h-64 space-y-2 overflow-y-auto rounded-2xl bg-slate-50 p-3">
                   <p className="text-xs font-bold text-slate-600">
-                    Bấm một dòng để phát đúng mốc lời và hợp âm:
+                    Select a line to seek to its lyrics and chords:
                   </p>
                   {aiResult.timeline.map((line, index) => (
                     <button
@@ -583,28 +379,28 @@ export default function AiAnalyzerPage() {
                 rows={10}
                 value={editableLyrics}
                 onChange={(e) => setEditableLyrics(e.target.value)}
-                className="w-full bg-slate-950 text-emerald-400 p-6 rounded-2xl font-mono text-sm leading-relaxed border border-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                className="w-full bg-slate-950 text-emerald-300 p-6 rounded-2xl font-mono text-sm leading-relaxed border border-indigo-400/40 focus:outline-none focus:ring-2 focus:ring-indigo-500/60"
               />
 
               <div className="bg-sky-50/70 border border-sky-200 rounded-2xl p-5 space-y-4">
                 <p className="text-xs font-bold text-sky-900">
-                  Lưu bản phân tích này vào thư viện để luyện tập cùng cần đàn
-                  Guitar đồng bộ:
+                  Save this analysis to your library and practice with the
+                  synchronized guitar fretboard:
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <input
                     type="text"
                     value={aiSongTitle}
                     onChange={(e) => setAiSongTitle(e.target.value)}
-                    placeholder="Đặt tên bài hát *"
-                    className="px-3.5 py-2.5 bg-white border border-sky-200 rounded-xl text-sm focus:outline-none focus:border-sky-500"
+                    placeholder="Song title *"
+                    className="px-3.5 py-2.5 bg-sky-50/70 text-sky-950 placeholder:text-sky-400 border border-sky-300 rounded-xl text-sm transition focus:outline-none focus:bg-white focus:border-sky-500 focus:ring-2 focus:ring-sky-400/40"
                   />
                   <input
                     type="text"
                     value={aiSongArtist}
                     onChange={(e) => setAiSongArtist(e.target.value)}
-                    placeholder="Tên ca sĩ / tác giả"
-                    className="px-3.5 py-2.5 bg-white border border-sky-200 rounded-xl text-sm focus:outline-none focus:border-sky-500"
+                    placeholder="Artist / author"
+                    className="px-3.5 py-2.5 bg-cyan-50/70 text-cyan-950 placeholder:text-cyan-500 border border-cyan-300 rounded-xl text-sm transition focus:outline-none focus:bg-white focus:border-cyan-500 focus:ring-2 focus:ring-cyan-400/40"
                   />
                 </div>
 
@@ -615,174 +411,12 @@ export default function AiAnalyzerPage() {
                   className="w-full py-3 rounded-xl bg-slate-900 hover:bg-sky-500 hover:text-slate-950 text-white font-extrabold text-xs inline-flex items-center justify-center gap-2 transition cursor-pointer"
                 >
                   <Guitar className="w-4 h-4" />
-                  {aiSaving ? "Đang lưu..." : "Lưu & Mở Trình Tập Đàn Guitar"}
+                  {aiSaving ? "Saving..." : "Save & Open Guitar Practice"}
                 </button>
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {/* ===================================================================== */}
-      {/* TAB 2: TỰ SOẠN NHANH (KÈM LIÊN KẾT SANG SONG PRODUCER NÂNG CAO)       */}
-      {/* ===================================================================== */}
-      {activeTab === "manual" && (
-        <form
-          onSubmit={handleCreateManualSong}
-          className="bg-white p-6 md:p-8 rounded-3xl border border-slate-200/80 shadow-sm space-y-6"
-        >
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-bold text-slate-800">
-                Soạn Chord Sheet Nhanh
-              </h2>
-              <p className="text-xs text-slate-400 mt-1">
-                Đặt hợp âm trong ngoặc vuông như{" "}
-                <code className="text-indigo-600 bg-indigo-50 px-1 py-0.5 rounded font-bold">
-                  [C]
-                </code>{" "}
-                để đàn Guitar tự nhận diện thế bấm.
-              </p>
-            </div>
-
-            <Link
-              to="/producer"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 text-xs font-bold transition shrink-0"
-            >
-              <Sliders className="w-3.5 h-3.5" /> Mở Studio Căn lề & Tô sáng
-            </Link>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                Tên bài hát *
-              </label>
-              <input
-                type="text"
-                placeholder="VD: Nàng Thơ"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                Ca sĩ / Người chia sẻ
-              </label>
-              <input
-                type="text"
-                placeholder="VD: Hoàng Dũng"
-                value={artist}
-                onChange={(e) => setArtist(e.target.value)}
-                className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                Thể loại & Tông chính
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                <select
-                  value={genre}
-                  onChange={(e) => setGenre(e.target.value)}
-                  className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium"
-                >
-                  <option value="Acoustic">Acoustic</option>
-                  <option value="Pop">Pop</option>
-                  <option value="Ballad">Ballad</option>
-                  <option value="Indie">Indie</option>
-                </select>
-                <input
-                  type="text"
-                  placeholder="Tông (VD: C, Am)"
-                  value={key}
-                  onChange={(e) => setKey(e.target.value)}
-                  className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                Chủ đề giao lưu (Vibe)
-              </label>
-              <select
-                value={vibeTag}
-                onChange={(e) => setVibeTag(e.target.value)}
-                className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium"
-              >
-                <option value="Chill & Share">☕ Chill & Share</option>
-                <option value="Acoustic Cuối Tuần">
-                  🎸 Acoustic Cuối Tuần
-                </option>
-                <option value="Hợp Âm Dễ Tập">🌱 Hợp Âm Dễ Tập</option>
-                <option value="Góc AI Sáng Tác">🤖 Góc AI Sáng Tác</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-3">
-            <label className="flex items-center gap-2 p-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-xs text-slate-600 cursor-pointer hover:border-indigo-400">
-              <Upload className="w-4 h-4 text-indigo-500 shrink-0" />
-              <span className="truncate">
-                {manualCover
-                  ? `Ảnh bìa: ${manualCover.name}`
-                  : "Đính kèm ảnh bìa (Tùy chọn)"}
-              </span>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => setManualCover(e.target.files[0])}
-                className="hidden"
-              />
-            </label>
-
-            <label className="flex items-center gap-2 p-3 bg-slate-50 border border-dashed border-slate-300 rounded-xl text-xs text-slate-600 cursor-pointer hover:border-indigo-400">
-              <Upload className="w-4 h-4 text-indigo-500 shrink-0" />
-              <span className="truncate">
-                {manualAudio
-                  ? `File nhạc: ${manualAudio.name}`
-                  : "Đính kèm bản thu MP3/WAV (Tùy chọn)"}
-              </span>
-              <input
-                type="file"
-                accept="audio/*"
-                onChange={(e) => setManualAudio(e.target.files[0])}
-                className="hidden"
-              />
-            </label>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-              Lời bài hát & Hợp âm *
-            </label>
-            <textarea
-              rows="10"
-              placeholder="[C] Em hát câu ca [G] mùa hạ&#10;[Am] Nắng vương trên đôi [F] bờ vai..."
-              value={lyrics}
-              onChange={(e) => setLyrics(e.target.value)}
-              className="w-full p-4 bg-slate-950 text-emerald-400 font-mono text-sm border border-slate-800 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500/50 leading-relaxed"
-              required
-            ></textarea>
-          </div>
-
-          <button
-            type="submit"
-            disabled={saveLoading}
-            className="w-full py-4 bg-linear-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-2xl shadow-lg shadow-indigo-500/25 transition disabled:opacity-50 text-sm inline-flex items-center justify-center gap-2 cursor-pointer"
-          >
-            <Save className="w-4 h-4" />
-            {saveLoading
-              ? "Đang lưu & tải lên Cloudinary..."
-              : "Lưu & Mở Trình Phát Đàn Guitar"}
-          </button>
-        </form>
-      )}
+      </div>
     </div>
   );
 }

@@ -231,7 +231,7 @@ const spawnPythonAnalyzer = (
     });
 
     pythonProcess.on("error", (err) => {
-      const error = new Error("Không thể khởi chạy tiến trình Python AI");
+      const error = new Error("Unable to start the Python AI process.");
       error.details = err.message;
       reject(error);
     });
@@ -239,7 +239,7 @@ const spawnPythonAnalyzer = (
     pythonProcess.on("close", (code) => {
       try {
         if (!dataString.trim()) {
-          const error = new Error("Python AI không trả về dữ liệu phân tích");
+          const error = new Error("The Python AI process returned no analysis data.");
           error.details = errorString || `Exit code: ${code}`;
           return reject(error);
         }
@@ -247,7 +247,7 @@ const spawnPythonAnalyzer = (
         const rawResult = parsePythonJsonOutput(dataString);
         if (rawResult.success === false) {
           const error = new Error(
-            rawResult.error || "Lỗi xử lý từ Python AI",
+            rawResult.error || "Python AI processing failed.",
           );
           error.details = errorString;
           return reject(error);
@@ -255,7 +255,7 @@ const spawnPythonAnalyzer = (
 
         resolve(formatAiOutput(rawResult));
       } catch (err) {
-        const error = new Error("Lỗi parse dữ liệu từ Python AI");
+        const error = new Error("Failed to parse Python AI output.");
         error.details = errorString || err.message;
         reject(error);
       }

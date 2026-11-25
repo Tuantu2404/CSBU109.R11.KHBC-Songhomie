@@ -20,7 +20,7 @@ const fileFilter = (req, file, cb) => {
   if (allowedAudio.includes(file.mimetype) || allowedImage.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Định dạng file không hỗ trợ. Chỉ chấp nhận MP3, WAV, JPG, PNG, WEBP.'), false);
+    cb(new Error('Unsupported file format. Only MP3, WAV, JPG, PNG, and WEBP files are allowed.'), false);
   }
 };
 

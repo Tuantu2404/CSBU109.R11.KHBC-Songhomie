@@ -10,7 +10,7 @@ exports.getSongComments = async (req, res) => {
 
     res.json({ success: true, count: comments.length, data: comments });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi máy chủ', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error.', error: error.message });
   }
 };
 
@@ -23,7 +23,7 @@ exports.createComment = async (req, res) => {
     if (!content) {
       return res
         .status(400)
-        .json({ success: false, message: 'Nội dung bình luận không được trống' });
+        .json({ success: false, message: 'Comment cannot be empty.' });
     }
 
     const comment = await Comment.create({
@@ -36,8 +36,8 @@ exports.createComment = async (req, res) => {
 
     res
       .status(201)
-      .json({ success: true, message: 'Thêm bình luận thành công', data: populatedComment });
+      .json({ success: true, message: 'Comment added successfully.', data: populatedComment });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi máy chủ', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error.', error: error.message });
   }
 };
