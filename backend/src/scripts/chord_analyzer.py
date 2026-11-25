@@ -413,11 +413,6 @@ def _download_youtube_audio(url):
         "no_warnings": True,
         "noprogress": True,
         "js_runtimes": {"node": {}},
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "ios", "web"],
-            }
-        },
     }
 
     cookies_path = os.environ.get("YT_COOKIES_PATH", "").strip()
