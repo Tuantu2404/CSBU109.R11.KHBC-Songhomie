@@ -479,50 +479,89 @@ def _smooth_chord_timeline(raw_segments, min_duration=0.55):
 
 
 def _extract_chords_and_tempo(y_inst, sr, librosa):
-    """Nhận diện tông chủ đạo, tempo và hợp âm."""
-    y_harmonic = librosa.effects.harmonic(y_inst, margin=3.0)
-    chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr)
+    """Nhận diện hợp âm theo từng đoạn để giới hạn bộ nhớ đỉnh."""
+    chunk_seconds = 20
+    chunk_samples = int(chunk_seconds * sr)
+    chroma_sum = np.zeros(12, dtype=np.float64)
+    chroma_frame_count = 0
+    tempo_values = []
+    raw_segments = []
+    duration = float(librosa.get_duration(y=y_inst, sr=sr))
 
-    mean_chroma = np.mean(chroma, axis=1)
+    for chunk_start_sample in range(0, len(y_inst), chunk_samples):
+        chunk_end_sample = min(chunk_start_sample + chunk_samples, len(y_inst))
+        chunk_start = chunk_start_sample / sr
+        y_chunk = y_inst[chunk_start_sample:chunk_end_sample]
+        chunk_duration = len(y_chunk) / sr
+
+        y_harmonic = librosa.effects.harmonic(y_chunk, margin=3.0)
+        chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr)
+        chroma_sum += np.sum(chroma, axis=1)
+        chroma_frame_count += chroma.shape[1]
+
+        tempo, beat_frames = librosa.beat.beat_track(y=y_harmonic, sr=sr)
+        if len(beat_frames) < 2:
+            beat_frames = librosa.time_to_frames(
+                np.arange(0, max(chunk_duration, 2.0), 2.0),
+                sr=sr,
+            )
+
+        beat_chroma = librosa.util.sync(chroma, beat_frames, aggregate=np.median)
+        fixed_frames = librosa.util.fix_frames(
+            beat_frames,
+            x_min=0,
+            x_max=chroma.shape[1],
+        )
+        beat_times = librosa.frames_to_time(fixed_frames, sr=sr) + chunk_start
+
+        norms = np.linalg.norm(beat_chroma, axis=0, keepdims=True)
+        valid_mask = norms[0] > 1e-9
+        beat_chroma_norm = np.divide(
+            beat_chroma,
+            norms,
+            out=np.zeros_like(beat_chroma),
+            where=norms > 1e-9,
+        )
+        similarities = CHORD_MATRIX @ beat_chroma_norm
+        best_indices = np.argmax(similarities, axis=0)
+        best_scores = similarities[best_indices, np.arange(similarities.shape[1])]
+
+        num_segments = min(len(best_indices), len(beat_times))
+        chunk_end = chunk_start + chunk_duration
+        for idx in range(num_segments):
+            if not valid_mask[idx] or best_scores[idx] <= 0.42:
+                continue
+            start_t = float(beat_times[idx])
+            end_t = (
+                float(beat_times[idx + 1])
+                if idx + 1 < len(beat_times)
+                else chunk_end
+            )
+            raw_segments.append({
+                "start": start_t,
+                "end": max(end_t, start_t + 0.1),
+                "chord": CHORD_NAMES[best_indices[idx]],
+            })
+
+        tempo_array = np.asarray(tempo).reshape(-1)
+        if tempo_array.size and np.isfinite(tempo_array[0]) and tempo_array[0] > 0:
+            tempo_values.append(float(tempo_array[0]))
+
+        del y_chunk, y_harmonic, chroma, beat_chroma, beat_chroma_norm
+
+    mean_chroma = (
+        chroma_sum / chroma_frame_count
+        if chroma_frame_count
+        else chroma_sum
+    )
     mean_norm = np.linalg.norm(mean_chroma)
     detected_key = "C"
     if mean_norm > 1e-9:
         key_scores = CHORD_MATRIX @ (mean_chroma / mean_norm)
         detected_key = CHORD_NAMES[int(np.argmax(key_scores))]
 
-    duration = float(librosa.get_duration(y=y_inst, sr=sr))
-    tempo, beat_frames = librosa.beat.beat_track(y=y_harmonic, sr=sr)
-    if len(beat_frames) < 2:
-        beat_frames = librosa.time_to_frames(np.arange(0, max(duration, 2.0), 2.0), sr=sr)
-
-    beat_chroma = librosa.util.sync(chroma, beat_frames, aggregate=np.median)
-    fixed_frames = librosa.util.fix_frames(beat_frames, x_min=0, x_max=chroma.shape[1])
-    beat_times = librosa.frames_to_time(fixed_frames, sr=sr)
-
-    norms = np.linalg.norm(beat_chroma, axis=0, keepdims=True)
-    valid_mask = norms[0] > 1e-9
-    beat_chroma_norm = np.divide(beat_chroma, norms, out=np.zeros_like(beat_chroma), where=norms > 1e-9)
-
-    similarities = CHORD_MATRIX @ beat_chroma_norm
-    best_indices = np.argmax(similarities, axis=0)
-    best_scores = similarities[best_indices, np.arange(similarities.shape[1])]
-
-    raw_segments = []
-    num_segments = min(len(best_indices), len(beat_times))
-
-    for idx in range(num_segments):
-        if not valid_mask[idx] or best_scores[idx] <= 0.42:
-            continue
-        start_t = float(beat_times[idx])
-        end_t = float(beat_times[idx + 1]) if idx + 1 < len(beat_times) else duration
-        raw_segments.append({
-            "start": start_t,
-            "end": max(end_t, start_t + 0.1),
-            "chord": CHORD_NAMES[best_indices[idx]],
-        })
-
     chords_output = _smooth_chord_timeline(raw_segments, min_duration=0.55)
-    calc_tempo = round(float(tempo), 2) if np.isscalar(tempo) else round(float(tempo[0]), 2)
+    calc_tempo = round(float(np.median(tempo_values)), 2) if tempo_values else 0
     return chords_output, calc_tempo, detected_key
 
 
@@ -619,7 +658,7 @@ def _transcribe_with_whisper_fast(
         whisper_size = (
             os.environ.get("WHISPER_MODEL")
             or os.environ.get("WHISPER_MODEL_SIZE")
-            or "small"
+            or "tiny"
         ).strip()
         model = WhisperModel(whisper_size, device="cpu", compute_type="int8")
         segments, info = model.transcribe(
