@@ -9,13 +9,13 @@ const forumPostSchema = new mongoose.Schema(
     },
     title: {
       type: String,
-      required: [true, 'Vui lòng nhập tiêu đề bài viết'],
+      required: [true, 'Please enter a post title.'],
       trim: true,
       maxlength: 200,
     },
     content: {
       type: String,
-      required: [true, 'Vui lòng nhập nội dung chia sẻ'],
+      required: [true, 'Please enter post content.'],
       trim: true,
     },
     category: {

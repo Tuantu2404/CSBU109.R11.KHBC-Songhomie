@@ -36,7 +36,7 @@ exports.getAllSongs = async (req, res) => {
 
     res.json({ success: true, count: songs.length, data: songs });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi máy chủ', error: error.message });
+    res.status(500).json({ success: false, message: 'Server error.', error: error.message });
   }
 };
 
@@ -46,7 +46,7 @@ exports.getSongById = async (req, res) => {
   try {
     const song = await Song.findById(req.params.id).populate('user', 'username avatar');
     if (!song) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy bài hát' });
+      return res.status(404).json({ success: false, message: 'Song not found.' });
     }
 
     song.views = (song.views || 0) + 1;
@@ -54,7 +54,7 @@ exports.getSongById = async (req, res) => {
 
     res.json({ success: true, data: song });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'ID bài hát không hợp lệ', error: error.message });
+    res.status(500).json({ success: false, message: 'Invalid song ID.', error: error.message });
   }
 };
 
@@ -85,13 +85,13 @@ exports.createSong = async (req, res) => {
     const hasAudioFile = Boolean(req.files?.audio?.[0] || req.body.audioPath);
 
     if (!title) {
-      return res.status(400).json({ success: false, message: 'Vui lòng nhập tiêu đề bài hát' });
+      return res.status(400).json({ success: false, message: 'Please enter a song title.' });
     }
 
     if (!finalLyrics && !lyricsAi && !hasAudioFile) {
       return res.status(400).json({
         success: false,
-        message: 'Vui lòng nhập lời bài hát hoặc tải lên file âm thanh'
+        message: 'Please enter lyrics or upload an audio file.'
       });
     }
 
@@ -137,11 +137,12 @@ exports.createSong = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Tạo bài hát thành công!',
+      message: 'Song created successfully.',
       data: song
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi máy chủ', error: error.message });
+    console.error('[Create Song Error]:', error.message);
+    res.status(500).json({ success: false, message: 'Server error.', error: error.message });
   }
 };
 
@@ -151,12 +152,12 @@ exports.updateSong = async (req, res) => {
   try {
     const song = await Song.findById(req.params.id);
     if (!song) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy bài hát' });
+      return res.status(404).json({ success: false, message: 'Song not found.' });
     }
 
     const userId = (req.user._id || req.user.id).toString();
     if (song.user.toString() !== userId && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: 'Bạn không có quyền chỉnh sửa bài hát này' });
+      return res.status(403).json({ success: false, message: 'You are not allowed to edit this song.' });
     }
 
     // Cập nhật ảnh bìa mới lên Cloudinary nếu người dùng tải file mới
@@ -210,11 +211,11 @@ exports.updateSong = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Cập nhật bài hát thành công!',
+      message: 'Song updated successfully.',
       data: song
     });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi cập nhật bài hát', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to update song.', error: error.message });
   }
 };
 
@@ -224,18 +225,18 @@ exports.deleteSong = async (req, res) => {
   try {
     const song = await Song.findById(req.params.id);
     if (!song) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy bài hát' });
+      return res.status(404).json({ success: false, message: 'Song not found.' });
     }
 
     const userId = (req.user._id || req.user.id).toString();
-    if (song.user.toString() !== userId && req.user.role !== 'admin') {
-      return res.status(403).json({ success: false, message: 'Bạn không có quyền xóa bài hát này' });
+    if (song.user.toString() !== userId) {
+      return res.status(403).json({ success: false, message: 'You are not allowed to delete this song.' });
     }
 
     await song.deleteOne();
-    res.json({ success: true, message: 'Đã xóa bài hát thành công' });
+    res.json({ success: true, message: 'Song deleted successfully.' });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi xóa bài hát', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to delete song.', error: error.message });
   }
 };
 
@@ -247,12 +248,12 @@ exports.reactToSong = async (req, res) => {
     const allowedTypes = ['clap', 'guitar', 'heart'];
 
     if (!allowedTypes.includes(reactionType)) {
-      return res.status(400).json({ success: false, message: 'Loại cảm xúc không hợp lệ' });
+      return res.status(400).json({ success: false, message: 'Invalid reaction type.' });
     }
 
     const song = await Song.findById(req.params.id);
     if (!song) {
-      return res.status(404).json({ success: false, message: 'Không tìm thấy bài hát' });
+      return res.status(404).json({ success: false, message: 'Song not found.' });
     }
 
     const userId = (req.user._id || req.user.id).toString();
@@ -267,7 +268,7 @@ exports.reactToSong = async (req, res) => {
 
     res.json({ success: true, data: song.reactions });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi thả cảm xúc', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to update reaction.', error: error.message });
   }
 };
 
@@ -276,7 +277,7 @@ exports.reactToSong = async (req, res) => {
 exports.toggleLikeSong = async (req, res) => {
   try {
     const song = await Song.findById(req.params.id);
-    if (!song) return res.status(404).json({ success: false, message: 'Không tìm thấy bài hát' });
+    if (!song) return res.status(404).json({ success: false, message: 'Song not found.' });
 
     const userId = (req.user._id || req.user.id).toString();
     const index = song.likes.findIndex((id) => id.toString() === userId);
@@ -287,7 +288,7 @@ exports.toggleLikeSong = async (req, res) => {
     await song.save();
     res.json({ success: true, data: song.likes });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi thao tác yêu thích', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to update favorite.', error: error.message });
   }
 };
 
@@ -296,7 +297,7 @@ exports.toggleLikeSong = async (req, res) => {
 exports.toggleBookmarkSong = async (req, res) => {
   try {
     const song = await Song.findById(req.params.id);
-    if (!song) return res.status(404).json({ success: false, message: 'Không tìm thấy bài hát' });
+    if (!song) return res.status(404).json({ success: false, message: 'Song not found.' });
 
     const userId = (req.user._id || req.user.id).toString();
     const index = song.bookmarks.findIndex((id) => id.toString() === userId);
@@ -307,6 +308,6 @@ exports.toggleBookmarkSong = async (req, res) => {
     await song.save();
     res.json({ success: true, data: song.bookmarks });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi lưu bài hát', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to update saved songs.', error: error.message });
   }
 };

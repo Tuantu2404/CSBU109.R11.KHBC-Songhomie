@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import API from '../services/api';
 import { AuthContext } from '../context/AuthContext';
+import { getForumCategoryLabel } from '../utils/categoryLabels';
 
 const CATEGORIES = [
   'All',
@@ -47,7 +48,7 @@ export default function ForumPage() {
       setPosts(postRes.data.data || []);
       setSongs(songRes.data.data || []);
     } catch (err) {
-      console.error('Lỗi tải dữ liệu diễn đàn:', err);
+      console.error('Failed to load forum data:', err);
     } finally {
       setLoading(false);
     }
@@ -76,7 +77,7 @@ export default function ForumPage() {
       setAttachedSong('');
       setShowCreateForm(false);
     } catch (err) {
-      alert(err.response?.data?.message || 'Vui lòng đăng nhập để đăng bài');
+      alert(err.response?.data?.message || 'Please sign in to create a post.');
     } finally {
       setSubmitting(false);
     }
@@ -85,7 +86,7 @@ export default function ForumPage() {
   // Thả nút cổ vũ tích cực (Cheer)
   const handleCheer = async (postId) => {
     if (!user) {
-      alert('Hãy đăng nhập để gửi lời cổ vũ tới bạn bè nhé!');
+      alert('Please sign in to cheer on the community.');
       return;
     }
     try {
@@ -94,7 +95,7 @@ export default function ForumPage() {
         prev.map((p) => (p._id === postId ? { ...p, cheers: res.data.data } : p))
       );
     } catch (err) {
-      console.error('Lỗi cổ vũ:', err);
+      console.error('Failed to send cheer:', err);
     }
   };
 
@@ -111,7 +112,7 @@ export default function ForumPage() {
       );
       setReplyTexts((prev) => ({ ...prev, [postId]: '' }));
     } catch (err) {
-      alert('Vui lòng đăng nhập để tham gia trò chuyện');
+      alert('Please sign in to join the conversation.');
     }
   };
 
@@ -121,13 +122,14 @@ export default function ForumPage() {
       <div className="bg-slate-900 text-white p-6 md:p-8 rounded-3xl border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg">
         <div>
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-sky-400/15 text-sky-300 text-xs font-bold border border-sky-400/30 mb-2">
-            <Sparkles className="w-3.5 h-3.5" /> Cộng đồng Yêu Nhạc & Đàn Hát
+            <Sparkles className="w-3.5 h-3.5" /> Music & Guitar Community
           </span>
           <h1 className="text-2xl md:text-3xl font-black">
-            Diễn Đàn Giao Lưu Songhomie
+            Songhomie Community Forum
           </h1>
           <p className="text-slate-400 text-sm mt-1">
-            Nơi chia sẻ bản cover ngẫu hứng, trao đổi hợp âm dễ tập và cổ vũ đam mê âm nhạc mỗi ngày.
+            Share casual covers, trade easy-to-play chord sheets, and encourage
+            each other's love of music.
           </p>
         </div>
 
@@ -136,7 +138,7 @@ export default function ForumPage() {
             to="/producer"
             className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-sky-300 text-xs font-bold border border-slate-700 transition"
           >
-            ✍️ Mở Song Producer
+            ✍️ Open Song Producer
           </Link>
           {user && (
             <button
@@ -145,7 +147,7 @@ export default function ForumPage() {
               className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-sky-400 hover:bg-sky-300 text-slate-950 text-xs font-extrabold transition cursor-pointer"
             >
               <PlusCircle className="w-4 h-4" />
-              {showCreateForm ? 'Đóng khung viết bài' : 'Chia sẻ bài mới'}
+              {showCreateForm ? 'Close post form' : 'Share a post'}
             </button>
           )}
         </div>
@@ -158,7 +160,7 @@ export default function ForumPage() {
           className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4"
         >
           <h2 className="text-lg font-extrabold text-slate-900">
-            Tạo chủ đề giao lưu mới
+            Create a Community Post
           </h2>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -167,7 +169,7 @@ export default function ForumPage() {
               required
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Tiêu đề chia sẻ (VD: Mới tập xong vòng hợp âm Canon C...)"
+              placeholder="Post title (e.g., I just learned the Canon chord progression...)"
               className="md:col-span-2 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-sky-500"
             />
             <select
@@ -177,7 +179,7 @@ export default function ForumPage() {
             >
               {CATEGORIES.filter((c) => c !== 'All').map((cat) => (
                 <option key={cat} value={cat}>
-                  {cat}
+                  {getForumCategoryLabel(cat)}
                 </option>
               ))}
             </select>
@@ -188,7 +190,7 @@ export default function ForumPage() {
             required
             value={content}
             onChange={(e) => setContent(e.target.value)}
-            placeholder="Kể về câu chuyện bài hát, cách quạt chả bạn đang dùng hoặc đặt câu hỏi cho mọi người..."
+            placeholder="Share a song story, your strumming pattern, or a question for the community..."
             className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-sky-500"
           />
 
@@ -198,7 +200,7 @@ export default function ForumPage() {
               onChange={(e) => setAttachedSong(e.target.value)}
               className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700"
             >
-              <option value="">-- Đính kèm Chord Sheet / Bản phối (Tùy chọn) --</option>
+              <option value="">-- Attach a chord sheet or arrangement (optional) --</option>
               {songs.map((s) => (
                 <option key={s._id} value={s._id}>
                   🎵 {s.title} ({s.artist})
@@ -211,7 +213,7 @@ export default function ForumPage() {
               disabled={submitting}
               className="px-6 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition cursor-pointer"
             >
-              {submitting ? 'Đang đăng...' : 'Đăng lên diễn đàn'}
+              {submitting ? 'Posting...' : 'Post to Forum'}
             </button>
           </div>
         </form>
@@ -230,7 +232,7 @@ export default function ForumPage() {
                 : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            {cat === 'All' ? '✨ Tất cả chủ đề' : cat}
+            {cat === 'All' ? '✨ All Topics' : getForumCategoryLabel(cat)}
           </button>
         ))}
       </div>
@@ -238,13 +240,13 @@ export default function ForumPage() {
       {/* Danh sách bài đăng giao lưu */}
       {loading ? (
         <div className="text-center py-16 text-slate-500 text-sm">
-          Đang tải không gian giao lưu...
+          Loading the community...
         </div>
       ) : posts.length === 0 ? (
         <div className="bg-white p-12 rounded-3xl border border-slate-200 text-center space-y-2">
-          <p className="text-slate-600 font-semibold">Chưa có bài chia sẻ nào ở mục này.</p>
+          <p className="text-slate-600 font-semibold">There are no posts in this category yet.</p>
           <p className="text-xs text-slate-400">
-            Hãy là người đầu tiên khơi nguồn cảm hứng âm nhạc cho mọi người nhé!
+            Be the first to inspire the community!
           </p>
         </div>
       ) : (
@@ -268,13 +270,13 @@ export default function ForumPage() {
                         {post.author?.username || 'Songhomie Member'}
                       </p>
                       <p className="text-[11px] text-slate-400">
-                        {new Date(post.createdAt).toLocaleDateString('vi-VN')}
+                        {new Date(post.createdAt).toLocaleDateString('en-US')}
                       </p>
                     </div>
                   </div>
 
                   <span className="px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 text-xs font-bold">
-                    {post.category}
+                    {getForumCategoryLabel(post.category)}
                   </span>
                 </div>
 
@@ -298,7 +300,7 @@ export default function ForumPage() {
                           {post.attachedSong.title}
                         </p>
                         <p className="text-xs text-slate-400">
-                          {post.attachedSong.artist} • Tông {post.attachedSong.key || 'C'}
+                          {post.attachedSong.artist} • Key {post.attachedSong.key || 'C'}
                         </p>
                       </div>
                     </div>
@@ -307,7 +309,7 @@ export default function ForumPage() {
                       to={`/songs/${post.attachedSong._id}`}
                       className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-400 hover:bg-sky-300 text-slate-950 text-xs font-extrabold transition"
                     >
-                      <Guitar className="w-4 h-4" /> Mở trên đàn Guitar
+                      <Guitar className="w-4 h-4" /> Open Guitar Player
                     </Link>
                   </div>
                 )}
@@ -323,12 +325,12 @@ export default function ForumPage() {
                         : 'bg-slate-100 hover:bg-sky-50 text-slate-700'
                     }`}
                   >
-                    🎶 Gửi lời cổ vũ ({post.cheers?.length || 0})
+                    🎶 Cheer ({post.cheers?.length || 0})
                   </button>
 
                   <span className="inline-flex items-center gap-1 text-xs text-slate-400 font-medium">
                     <MessageSquare className="w-3.5 h-3.5" />
-                    {post.replies?.length || 0} trao đổi
+                    {post.replies?.length || 0} replies
                   </span>
                 </div>
 
@@ -354,7 +356,7 @@ export default function ForumPage() {
                         onChange={(e) =>
                           setReplyTexts((prev) => ({ ...prev, [post._id]: e.target.value }))
                         }
-                        placeholder="Viết lời động viên hoặc chia sẻ mẹo đàn..."
+                        placeholder="Leave an encouraging note or share a guitar tip..."
                         className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-sky-400"
                       />
                       <button

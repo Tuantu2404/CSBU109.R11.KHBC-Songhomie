@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const playlistSchema = new mongoose.Schema({
   title: {
     type: String,
-    required: [true, 'Vui lòng nhập tên Setlist/Playlist'],
+    required: [true, 'Please enter a setlist or playlist name.'],
     trim: true
   },
   description: { type: String, default: '' },

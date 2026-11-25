@@ -23,7 +23,7 @@ exports.getAllPosts = async (req, res) => {
 
     res.json({ success: true, count: posts.length, data: posts });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi tải diễn đàn', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to load the forum.', error: error.message });
   }
 };
 
@@ -34,7 +34,7 @@ exports.createPost = async (req, res) => {
     const { title, content, category, attachedSong } = req.body;
 
     if (!title || !content) {
-      return res.status(400).json({ success: false, message: 'Vui lòng nhập đầy đủ tiêu đề và nội dung' });
+      return res.status(400).json({ success: false, message: 'Please enter both a title and content.' });
     }
 
     const newPost = await ForumPost.create({
@@ -49,9 +49,9 @@ exports.createPost = async (req, res) => {
       .populate('author', 'username avatar')
       .populate('attachedSong', 'title artist key vibeTag coverUrl');
 
-    res.status(201).json({ success: true, message: 'Đăng bài giao lưu thành công!', data: populated });
+    res.status(201).json({ success: true, message: 'Post published successfully.', data: populated });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi đăng bài viết', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to publish the post.', error: error.message });
   }
 };
 
@@ -60,7 +60,7 @@ exports.createPost = async (req, res) => {
 exports.toggleCheerPost = async (req, res) => {
   try {
     const post = await ForumPost.findById(req.params.id);
-    if (!post) return res.status(404).json({ success: false, message: 'Không tìm thấy bài viết' });
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found.' });
 
     const userId = (req.user._id || req.user.id).toString();
     const index = post.cheers.findIndex((id) => id.toString() === userId);
@@ -71,7 +71,7 @@ exports.toggleCheerPost = async (req, res) => {
     await post.save();
     res.json({ success: true, data: post.cheers });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi gửi cổ vũ', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to send reaction.', error: error.message });
   }
 };
 
@@ -81,11 +81,11 @@ exports.addReply = async (req, res) => {
   try {
     const { content } = req.body;
     if (!content?.trim()) {
-      return res.status(400).json({ success: false, message: 'Nội dung phản hồi không được để trống' });
+      return res.status(400).json({ success: false, message: 'Reply content cannot be empty.' });
     }
 
     const post = await ForumPost.findById(req.params.id);
-    if (!post) return res.status(404).json({ success: false, message: 'Không tìm thấy bài viết' });
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found.' });
 
     post.replies.push({
       user: req.user._id || req.user.id,
@@ -101,6 +101,6 @@ exports.addReply = async (req, res) => {
 
     res.status(201).json({ success: true, data: updated.replies });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Lỗi gửi phản hồi', error: error.message });
+    res.status(500).json({ success: false, message: 'Failed to send reply.', error: error.message });
   }
 };

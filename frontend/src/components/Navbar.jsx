@@ -8,7 +8,6 @@ const NAV_LINKS = [
   { path: '/ai-analyzer', label: 'AI Analyzer' },
   { path: '/producer', label: 'Song Producer' },
   { path: '/rankings', label: 'Trending Vibes' },
-  { path: '/competitions', label: 'Music Jam' },
   { path: '/forum', label: 'Forum' },
 ];
 

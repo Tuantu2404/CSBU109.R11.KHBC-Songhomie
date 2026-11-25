@@ -225,27 +225,6 @@ def _parse_lrc_lyrics(synced_lrc):
     return segments
 
 
-def _detect_first_vocal_time(y_vocal, sr, librosa):
-    """Dò giây đầu tiên có giọng hát để bù độ trễ đoạn nhạc dạo đầu (intro)."""
-    try:
-        from faster_whisper.vad import get_speech_timestamps, VadOptions
-
-        y_16k = (
-            librosa.resample(y_vocal, orig_sr=sr, target_sr=16000).astype(np.float32)
-            if sr != 16000
-            else y_vocal.astype(np.float32)
-        )
-        speech_chunks = get_speech_timestamps(
-            y_16k,
-            VadOptions(min_silence_duration_ms=700, speech_pad_ms=150),
-        )
-        if speech_chunks:
-            return round(float(speech_chunks[0]["start"]) / 16000.0, 2)
-    except Exception:
-        pass
-    return None
-
-
 def _fetch_synced_lyrics_from_lrclib(yt_meta, fallback_title=""):
     """Chế độ 1: Tra cứu lời bài hát chuẩn từ LRCLIB qua nhiều ứng viên từ khóa."""
     candidates = _build_search_candidates(yt_meta, fallback_title)
@@ -386,7 +365,7 @@ def _convert_to_wav_fallback(input_path):
 
     container.close()
     if not chunks:
-        raise RuntimeError("Không giải mã được dữ liệu âm thanh từ file tải về")
+        raise RuntimeError("Unable to decode the downloaded audio.")
 
     audio_data = np.concatenate(chunks)
     sf.write(wav_path, audio_data, 22050)
@@ -427,7 +406,7 @@ def _download_youtube_audio(url):
     out_tpl = os.path.join(temp_dir, f"songhomie_yt_{file_id}.%(ext)s")
 
     ydl_opts = {
-        "format": "bestaudio/best",
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
         "outtmpl": out_tpl,
         "noplaylist": True,
         "quiet": True,
@@ -436,7 +415,6 @@ def _download_youtube_audio(url):
         "js_runtimes": {"node": {}},
     }
 
-    # Hỗ trợ cookies.txt khi deploy lên VPS/Cloud để vượt qua kiểm tra bot của YouTube
     cookies_path = os.environ.get("YT_COOKIES_PATH", "").strip()
     if cookies_path and os.path.exists(cookies_path):
         ydl_opts["cookiefile"] = cookies_path
@@ -501,50 +479,89 @@ def _smooth_chord_timeline(raw_segments, min_duration=0.55):
 
 
 def _extract_chords_and_tempo(y_inst, sr, librosa):
-    """Nhận diện tông chủ đạo, tempo và hợp âm."""
-    y_harmonic = librosa.effects.harmonic(y_inst, margin=3.0)
-    chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr)
+    """Nhận diện hợp âm theo từng đoạn để giới hạn bộ nhớ đỉnh."""
+    chunk_seconds = 20
+    chunk_samples = int(chunk_seconds * sr)
+    chroma_sum = np.zeros(12, dtype=np.float64)
+    chroma_frame_count = 0
+    tempo_values = []
+    raw_segments = []
+    duration = float(librosa.get_duration(y=y_inst, sr=sr))
 
-    mean_chroma = np.mean(chroma, axis=1)
+    for chunk_start_sample in range(0, len(y_inst), chunk_samples):
+        chunk_end_sample = min(chunk_start_sample + chunk_samples, len(y_inst))
+        chunk_start = chunk_start_sample / sr
+        y_chunk = y_inst[chunk_start_sample:chunk_end_sample]
+        chunk_duration = len(y_chunk) / sr
+
+        y_harmonic = librosa.effects.harmonic(y_chunk, margin=3.0)
+        chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr)
+        chroma_sum += np.sum(chroma, axis=1)
+        chroma_frame_count += chroma.shape[1]
+
+        tempo, beat_frames = librosa.beat.beat_track(y=y_harmonic, sr=sr)
+        if len(beat_frames) < 2:
+            beat_frames = librosa.time_to_frames(
+                np.arange(0, max(chunk_duration, 2.0), 2.0),
+                sr=sr,
+            )
+
+        beat_chroma = librosa.util.sync(chroma, beat_frames, aggregate=np.median)
+        fixed_frames = librosa.util.fix_frames(
+            beat_frames,
+            x_min=0,
+            x_max=chroma.shape[1],
+        )
+        beat_times = librosa.frames_to_time(fixed_frames, sr=sr) + chunk_start
+
+        norms = np.linalg.norm(beat_chroma, axis=0, keepdims=True)
+        valid_mask = norms[0] > 1e-9
+        beat_chroma_norm = np.divide(
+            beat_chroma,
+            norms,
+            out=np.zeros_like(beat_chroma),
+            where=norms > 1e-9,
+        )
+        similarities = CHORD_MATRIX @ beat_chroma_norm
+        best_indices = np.argmax(similarities, axis=0)
+        best_scores = similarities[best_indices, np.arange(similarities.shape[1])]
+
+        num_segments = min(len(best_indices), len(beat_times))
+        chunk_end = chunk_start + chunk_duration
+        for idx in range(num_segments):
+            if not valid_mask[idx] or best_scores[idx] <= 0.42:
+                continue
+            start_t = float(beat_times[idx])
+            end_t = (
+                float(beat_times[idx + 1])
+                if idx + 1 < len(beat_times)
+                else chunk_end
+            )
+            raw_segments.append({
+                "start": start_t,
+                "end": max(end_t, start_t + 0.1),
+                "chord": CHORD_NAMES[best_indices[idx]],
+            })
+
+        tempo_array = np.asarray(tempo).reshape(-1)
+        if tempo_array.size and np.isfinite(tempo_array[0]) and tempo_array[0] > 0:
+            tempo_values.append(float(tempo_array[0]))
+
+        del y_chunk, y_harmonic, chroma, beat_chroma, beat_chroma_norm
+
+    mean_chroma = (
+        chroma_sum / chroma_frame_count
+        if chroma_frame_count
+        else chroma_sum
+    )
     mean_norm = np.linalg.norm(mean_chroma)
     detected_key = "C"
     if mean_norm > 1e-9:
         key_scores = CHORD_MATRIX @ (mean_chroma / mean_norm)
         detected_key = CHORD_NAMES[int(np.argmax(key_scores))]
 
-    duration = float(librosa.get_duration(y=y_inst, sr=sr))
-    tempo, beat_frames = librosa.beat.beat_track(y=y_harmonic, sr=sr)
-    if len(beat_frames) < 2:
-        beat_frames = librosa.time_to_frames(np.arange(0, max(duration, 2.0), 2.0), sr=sr)
-
-    beat_chroma = librosa.util.sync(chroma, beat_frames, aggregate=np.median)
-    fixed_frames = librosa.util.fix_frames(beat_frames, x_min=0, x_max=chroma.shape[1])
-    beat_times = librosa.frames_to_time(fixed_frames, sr=sr)
-
-    norms = np.linalg.norm(beat_chroma, axis=0, keepdims=True)
-    valid_mask = norms[0] > 1e-9
-    beat_chroma_norm = np.divide(beat_chroma, norms, out=np.zeros_like(beat_chroma), where=norms > 1e-9)
-
-    similarities = CHORD_MATRIX @ beat_chroma_norm
-    best_indices = np.argmax(similarities, axis=0)
-    best_scores = similarities[best_indices, np.arange(similarities.shape[1])]
-
-    raw_segments = []
-    num_segments = min(len(best_indices), len(beat_times))
-
-    for idx in range(num_segments):
-        if not valid_mask[idx] or best_scores[idx] <= 0.42:
-            continue
-        start_t = float(beat_times[idx])
-        end_t = float(beat_times[idx + 1]) if idx + 1 < len(beat_times) else duration
-        raw_segments.append({
-            "start": start_t,
-            "end": max(end_t, start_t + 0.1),
-            "chord": CHORD_NAMES[best_indices[idx]],
-        })
-
     chords_output = _smooth_chord_timeline(raw_segments, min_duration=0.55)
-    calc_tempo = round(float(tempo), 2) if np.isscalar(tempo) else round(float(tempo[0]), 2)
+    calc_tempo = round(float(np.median(tempo_values)), 2) if tempo_values else 0
     return chords_output, calc_tempo, detected_key
 
 
@@ -623,14 +640,12 @@ def _transcribe_with_whisper_fast(
     """Chế độ 2: AI nghe giọng hát tiếng Việt & tiếng Anh (Groq Cloud -> Local Whisper fallback)."""
     whisper_lang = lang_code if lang_code in SUPPORTED_LANGUAGES else None
 
-    # 1. Ưu tiên Groq Cloud (2 giây, không tốn RAM server)
     cloud_res = _transcribe_via_groq_cloud(y_vocal, sr, librosa, whisper_lang, initial_prompt)
     if cloud_res is not None:
         results, detected_lang = cloud_res
         results = _polish_lyrics_with_llm(results, song_title, detected_lang)
         return results, detected_lang, None
 
-    # 2. Dự phòng chạy nội bộ bằng Faster-Whisper
     try:
         from faster_whisper import WhisperModel
 
@@ -643,7 +658,7 @@ def _transcribe_with_whisper_fast(
         whisper_size = (
             os.environ.get("WHISPER_MODEL")
             or os.environ.get("WHISPER_MODEL_SIZE")
-            or "small"
+            or "tiny"
         ).strip()
         model = WhisperModel(whisper_size, device="cpu", compute_type="int8")
         segments, info = model.transcribe(
@@ -652,10 +667,9 @@ def _transcribe_with_whisper_fast(
             initial_prompt=initial_prompt,
             beam_size=3,
             word_timestamps=True,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=700, speech_pad_ms=250),
-            no_speech_threshold=0.6,
-            log_prob_threshold=-1.0,
+            vad_filter=False,
+            no_speech_threshold=0.85,
+            log_prob_threshold=-1.2,
             compression_ratio_threshold=2.4,
             condition_on_previous_text=False,
         )
@@ -666,7 +680,7 @@ def _transcribe_with_whisper_fast(
         for s in segments:
             text = (s.text or "").strip()
             no_speech_prob = getattr(s, "no_speech_prob", 0.0)
-            if not text or no_speech_prob > 0.65 or _is_hallucinated_subtitle(text):
+            if not text or no_speech_prob > 0.95 or _is_hallucinated_subtitle(text):
                 continue
 
             words = getattr(s, "words", None) or []
@@ -680,48 +694,72 @@ def _transcribe_with_whisper_fast(
         return [], lang_code, str(e)
 
 
-def _format_synced_lyrics(lyrics_segments, chords_output):
-    if not lyrics_segments:
-        return "\n".join(
-            f"[{c['time']}s] ({c['chord']}) [Beat Marker]" for c in chords_output
-        )
-
-    lines = []
+def _build_timed_lyrics(lyrics_segments, chords_output, duration):
+    """Giữ một khoảng nhạc dạo, sau đó chỉ tạo dòng cho từng câu lời."""
+    lyric_rows = []
     chord_idx = 0
     current_chord = chords_output[0]["chord"] if chords_output else "C"
-
     for seg in lyrics_segments:
-        start_time = seg["start"]
-        while chord_idx + 1 < len(chords_output) and chords_output[chord_idx + 1]["time"] <= start_time:
+        start_t = max(0.0, float(seg["start"]))
+        while chord_idx + 1 < len(chords_output) and chords_output[chord_idx + 1]["time"] <= start_t:
             chord_idx += 1
             current_chord = chords_output[chord_idx]["chord"]
 
-        mins = int(start_time // 60)
-        secs = start_time % 60
-        lines.append(f"[{mins:02d}:{secs:05.2f}] ({current_chord}) {seg['text']}")
+        lyric_rows.append({
+            "start": round(start_t, 2),
+            "chord": current_chord,
+            "text": seg["text"],
+            "isInstrumental": False,
+        })
 
+    lyric_rows.sort(key=lambda event: event["start"])
+    if not lyric_rows:
+        rows = [{
+            "start": 0.0,
+            "end": round(float(duration), 2),
+            "chord": "",
+            "text": "Instrumental section",
+            "isInstrumental": True,
+        }]
+    else:
+        rows = []
+        if lyric_rows[0]["start"] > 0:
+            rows.append({
+                "start": 0.0,
+                "end": lyric_rows[0]["start"],
+                "chord": "",
+                "text": "Instrumental section",
+                "isInstrumental": True,
+            })
+
+        for index, row in enumerate(lyric_rows):
+            next_time = (
+                lyric_rows[index + 1]["start"]
+                if index + 1 < len(lyric_rows)
+                else duration
+            )
+            row["end"] = round(max(row["start"], float(next_time or row["start"])), 2)
+            rows.append(row)
+
+    for index, row in enumerate(rows):
+        mins = int(row["start"] // 60)
+        secs = row["start"] % 60
+        row["timeLabel"] = f"{mins:02d}:{secs:05.2f}"
+        row["index"] = index
+
+    return rows
+
+
+def _format_synced_lyrics(timed_lyrics):
+    lines = []
+    for line in timed_lyrics:
+        if line["isInstrumental"]:
+            lines.append(f"[{line['timeLabel']}] {line['text']}")
+        else:
+            lines.append(
+                f"[{line['timeLabel']}] ({line['chord']}) {line['text']}".rstrip()
+            )
     return "\n".join(lines)
-
-
-def _mock_fallback():
-    return {
-        "success": True,
-        "isMock": True,
-        "tempo": 120,
-        "key": "C",
-        "chords": [
-            {"time": 0.0, "chord": "C"},
-            {"time": 4.0, "chord": "G"},
-            {"time": 8.0, "chord": "Am"},
-            {"time": 12.0, "chord": "F"},
-        ],
-        "lyrics": (
-            "[00:00.00] (C) Nắng vàng góc phố quen\n"
-            "[00:04.00] (G) Tiếng đàn cất lên êm đềm\n"
-            "[00:08.00] (Am) Songhomie ghi lại giai điệu\n"
-            "[00:12.00] (F) Trao nhau từng nốt nhạc yêu thương"
-        ),
-    }
 
 
 def analyze_audio(
@@ -729,6 +767,8 @@ def analyze_audio(
     lang_code="auto",
     lyric_mode="search",
     quality_mode="fast",
+    track_title="",
+    artist_name="",
 ):
     temp_files = []
     stem_dir = None
@@ -748,13 +788,21 @@ def analyze_audio(
             except Exception as yt_err:
                 return {
                     "success": False,
-                    "error": f"Không tải được audio từ YouTube: {str(yt_err)}",
+                    "error": f"Unable to download audio from YouTube: {str(yt_err)}",
                 }
         else:
-            fallback_title = os.path.splitext(os.path.basename(file_path))[0]
+            fallback_title = (
+                _strip_noise_words(track_title)
+                or os.path.splitext(os.path.basename(file_path))[0]
+            )
+            yt_meta = {
+                "title": fallback_title,
+                "track": fallback_title,
+                "artist": _strip_noise_words(artist_name),
+            }
 
         if not os.path.exists(file_path):
-            return {"success": False, "error": f"File không tồn tại: {file_path}"}
+            return {"success": False, "error": f"File not found: {file_path}"}
 
         import librosa
 
@@ -778,7 +826,6 @@ def analyze_audio(
         y_inst = y_mixed
         stem_separated = False
 
-        # Chỉ tách vocal khi ở chế độ 'transcribe' (AI tự nghe) + chất lượng 'studio'
         disable_stem = os.environ.get("DISABLE_STEM_SEPARATION", "").lower() == "true"
         should_separate = (
             normalized_mode == "transcribe"
@@ -796,7 +843,6 @@ def analyze_audio(
                     y_vocal = y_mixed
                     y_inst = y_mixed
 
-        # Nhận diện hợp âm trên track instrumental
         chords_output, calc_tempo, detected_key = _extract_chords_and_tempo(y_inst, sr, librosa)
 
         whisper_err = None
@@ -806,7 +852,6 @@ def analyze_audio(
         initial_prompt = _build_whisper_initial_prompt(yt_meta, fallback_title)
 
         if normalized_mode == "transcribe":
-            # CHẾ ĐỘ 2: AI nghe trực tiếp giọng hát
             lyrics_source = "whisper"
             lyrics_segments, detected_lang, whisper_err = _transcribe_with_whisper_fast(
                 y_vocal,
@@ -817,20 +862,12 @@ def analyze_audio(
                 initial_prompt=initial_prompt,
             )
         else:
-            # CHẾ ĐỘ 1: Tìm lời chuẩn theo tiêu đề trên LRCLIB + bù trễ intro
             lyrics_source = "lrclib"
             lyrics_segments, lrclib_title = _fetch_synced_lyrics_from_lrclib(yt_meta, fallback_title)
             if lrclib_title:
                 matched_title = lrclib_title
 
-            if lyrics_segments:
-                first_vocal = _detect_first_vocal_time(y_vocal, sr, librosa)
-                if first_vocal is not None:
-                    intro_offset = round(first_vocal - lyrics_segments[0]["start"], 2)
-                    if intro_offset > 3.5:
-                        for seg in lyrics_segments:
-                            seg["start"] = round(seg["start"] + intro_offset, 2)
-            else:
+            if not lyrics_segments:
                 lyrics_source = "whisper"
                 matched_title = _strip_noise_words(fallback_title) or fallback_title
                 lyrics_segments, detected_lang, whisper_err = _transcribe_with_whisper_fast(
@@ -842,11 +879,20 @@ def analyze_audio(
                     initial_prompt=initial_prompt,
                 )
 
-        full_lyrics_text = _format_synced_lyrics(lyrics_segments, chords_output)
+        audio_duration = float(librosa.get_duration(y=y_mixed, sr=sr))
+        timed_lyrics = _build_timed_lyrics(lyrics_segments, chords_output, audio_duration)
+        full_lyrics_text = _format_synced_lyrics(timed_lyrics)
+        lyrics_warning = ""
+        if not lyrics_segments:
+            lyrics_warning = whisper_err or (
+                "Lyrics could not be detected. Make sure the file contains clear vocals "
+                "and configure GROQ_API_KEY or install Faster-Whisper on the server."
+            )
 
         return {
             "success": True,
             "lyrics": full_lyrics_text,
+            "timedLyrics": timed_lyrics,
             "chords": chords_output,
             "tempo": calc_tempo,
             "key": detected_key,
@@ -857,10 +903,11 @@ def analyze_audio(
             "detectedLanguage": detected_lang,
             "detectedTitle": matched_title,
             "whisperWarning": whisper_err,
+            "lyricsWarning": lyrics_warning,
         }
 
-    except ImportError:
-        return _mock_fallback()
+    except ImportError as e:
+        return {"success": False, "error": f"Missing required AI dependency: {e}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
     finally:
@@ -880,6 +927,8 @@ if __name__ == "__main__":
         requested_lang = sys.argv[2] if len(sys.argv) > 2 else "auto"
         requested_mode = sys.argv[3] if len(sys.argv) > 3 else "search"
         requested_quality = sys.argv[4] if len(sys.argv) > 4 else "fast"
+        requested_title = sys.argv[5] if len(sys.argv) > 5 else ""
+        requested_artist = sys.argv[6] if len(sys.argv) > 6 else ""
         real_stdout = sys.stdout
         sys.stdout = sys.stderr
         try:
@@ -888,6 +937,8 @@ if __name__ == "__main__":
                 requested_lang,
                 requested_mode,
                 requested_quality,
+                requested_title,
+                requested_artist,
             )
         finally:
             sys.stdout = real_stdout
@@ -895,8 +946,9 @@ if __name__ == "__main__":
     else:
         print(
             json.dumps(
-                {"success": False, "error": "Thiếu đường dẫn file âm thanh đầu vào"},
+                {"success": False, "error": "Missing input audio file path."},
                 ensure_ascii=False,
             ),
             flush=True,
         )
+        

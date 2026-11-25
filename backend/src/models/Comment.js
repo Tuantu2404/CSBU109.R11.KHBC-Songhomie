@@ -13,7 +13,7 @@ const commentSchema = new mongoose.Schema({
   },
   content: {
     type: String,
-    required: [true, 'Nội dung bình luận không được để trống']
+    required: [true, 'Comment content cannot be empty.']
   },
   rating: {
     type: Number,

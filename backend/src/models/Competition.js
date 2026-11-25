@@ -3,12 +3,12 @@ const mongoose = require('mongoose');
 const competitionSchema = new mongoose.Schema({
   title: {
     type: String,
-    required: [true, 'Vui lòng nhập tên cuộc thi'],
+    required: [true, 'Please enter a competition name.'],
     trim: true
   },
   description: {
     type: String,
-    required: [true, 'Vui lòng nhập thể lệ cuộc thi']
+    required: [true, 'Please enter the competition rules.']
   },
   banner: {
     type: String,
@@ -23,7 +23,7 @@ const competitionSchema = new mongoose.Schema({
   },
   reward: {
     type: String,
-    default: 'Huy hiệu Vinh Danh + 500 Điểm đóng góp'
+    default: 'Recognition Badge + 500 Contribution Points'
   },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,

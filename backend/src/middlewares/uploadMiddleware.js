@@ -20,13 +20,13 @@ const fileFilter = (req, file, cb) => {
   if (allowedAudio.includes(file.mimetype) || allowedImage.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Định dạng file không hỗ trợ. Chỉ chấp nhận MP3, WAV, JPG, PNG, WEBP.'), false);
+    cb(new Error('Unsupported file format. Only MP3, WAV, JPG, PNG, and WEBP files are allowed.'), false);
   }
 };
 
 const upload = multer({
   storage,
-  limits: { fileSize: 25 * 1024 * 1024 }, // Tối đa 25MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // Tối đa 50MB
   fileFilter
 });
 

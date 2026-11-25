@@ -138,10 +138,10 @@ export default function GuitarFretboard({ chord = 'C', autoPlayTrigger = 0 }) {
         <button
           type="button"
           onClick={handleStrum}
-          title="Nghe thử thế bấm hợp âm này"
+          title="Preview this chord fingering"
           className="inline-flex items-center gap-1 text-[11px] font-extrabold text-sky-400 hover:text-sky-300 transition cursor-pointer"
         >
-          <Volume2 className="w-3.5 h-3.5" /> GẢY THỬ
+          <Volume2 className="w-3.5 h-3.5" /> STRUM
         </button>
 
         <span className="px-2.5 py-0.5 rounded-lg bg-sky-500/20 border border-sky-400/50 text-sky-300 font-black text-sm">

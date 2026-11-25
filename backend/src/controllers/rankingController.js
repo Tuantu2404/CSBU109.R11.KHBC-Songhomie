@@ -31,7 +31,7 @@ exports.getTopHotChords = async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Lỗi máy chủ',
+      message: 'Server error.',
       error: error.message,
     });
   }
@@ -56,7 +56,7 @@ exports.getTopAiSongs = async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Lỗi máy chủ',
+      message: 'Server error.',
       error: error.message,
     });
   }
@@ -76,7 +76,7 @@ exports.getTopCreators = async (req, res) => {
   } catch (error) {
     res.status(500).json({
       success: false,
-      message: 'Lỗi máy chủ',
+      message: 'Server error.',
       error: error.message,
     });
   }
